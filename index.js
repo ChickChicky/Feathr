@@ -7,7 +7,7 @@ const hash = d => crypto.createHash('sha1').update(d).digest('hex');
 const sout = process.stdout;
 const sin  = process.stdin;
 
-let buff = 'Hello';
+let buff = '';
 let getlines = ()=>buff.split(/\r?\n/g);
 
 let b_hash  = () => hash(buff);
@@ -199,7 +199,7 @@ function render() {
     let modified = b_hash() != bb_hash;
     let middle_txt = `${filename==noFile?`\x1b[36m${filename.description}\x1b[39m`:filename}${modified?'\x1b[33m*\x1b[39m':''}`;
     let curr = ccurfn(icur1());
-    let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}] ${cur0.join(':')}`;
+    let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}]`;
     let i0 = Math.min(icur0(),icur1());
     let i1 = Math.max(icur0(),icur1());
     let cp = [
@@ -211,8 +211,8 @@ function render() {
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
         visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll==curr[1]?'\x1b[7m':'')+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
-        `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
-        `\n\x1b[40m\x1b[K`+
+        `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
+        `\n\x1b[40m\x1b[K\x1b[31m^\x1b[39m  Menu  `+
         `\x1b[${cp.join(';')}H`
     ;
     sout.write(buffer);
@@ -256,7 +256,7 @@ function backsp() {
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
     if (c0 != c1) {
-        buff = buff.slice(0,c0  ) + buff.slice(c1);
+        buff = buff.slice(0,c0) + buff.slice(c1);
         cur1 = ccurfn(Math.min(c0,c1));
         cur0 = [...cur1];
     }
@@ -268,10 +268,30 @@ function backsp() {
     adjust_view();
 }
 
+function del() {
+    let c0 = Math.min(icur0(),icur1()),
+        c1 = Math.max(icur0(),icur1());
+    if (c0 != c1) {
+        buff = buff.slice(0,c0) + buff.slice(c1);
+        cur1 = ccurfn(Math.min(c0,c1));
+        cur0 = [...cur1];
+    }
+    else {
+        buff = buff.slice(0,c1) + buff.slice(Math.max(0,c1+1));
+    }
+    adjust_view();
+}
+
 function move_cursor(dc,dr,mod) {
+    let indent = Array.from(getlines()[ccurfn(icur1())[1]].match(/^\s*/))[0].length;
     if (mod == 1) { // shift
         if (dc) {
-            cur1 = ccurfn(icur1()+dc);
+            if (dc == Infinity)
+                cur1[0] = getlines()[cur1[1]].length;
+            else if (dc == -Infinity)
+                cur1[0] = cur1[0] == indent ? 0 : indent;
+            else
+                cur1 = ccurfn(icur1()+dc);
         }
         if (dr) {
             cur1 = [cur1[0],Math.min(getlines().length,Math.max(0,cur1[1]+dr))];
@@ -282,7 +302,12 @@ function move_cursor(dc,dr,mod) {
         hscroll += dc;
     } else {
         if (dc) {
-            cur1 = ccurfn(icur1()+dc);
+            if (dc == Infinity)
+                cur1[0] = getlines()[cur1[1]].length;
+            else if (dc == -Infinity)
+                cur1[0] = cur1[0] == indent ? 0 : indent;
+            else
+                cur1 = ccurfn(icur1()+dc);
             cur0 = [...cur1];
         }
         if (dr) {
@@ -302,13 +327,13 @@ async function openMenu(pre='') {
          * @param {string} s
          */
         s => {
-            if (s.startsWith(':')) {
+            if (s.startsWith('g')) {
                 let m = 0;
-                return '\x1b[107m\x1b[35m:\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
+                return '\x1b[40m\x1b[35mg\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
                     v => 
                         (v.match(/^\d+$/) ? 
                             m < 2 ?
-                                '\x1b[34m':
+                                '\x1b[33m':
                                 '\x1b[31m':
                             v == ':' ? 
                                 m++ ==0  ? 
@@ -318,13 +343,13 @@ async function openMenu(pre='') {
                         v+'\x1b[39m'   
                 );
             }
-            return '\x1b[30;107m'+s;
+            return '\x1b[37;40m'+s;
         },
     pre,'','\x1B\x18 ');
     if (cmd == input.cancel) return;
-    if (cmd.match(/^:(\d+)(?::(\d+))?$/)) {
-        let [,l,c] = cmd.match(/^:(\d+)(?::(\d+))?$/);
-        cur1 = ccurfn(icurfn([+l,(+c)??cur1[1]]));
+    if (cmd.match(/^g(\d+)(?::(\d+))?$/)) {
+        let [,l,c] = cmd.match(/^g(\d+)(?::(\d+))?$/);
+        cur1 = ccurfn(icurfn([+(c??cur1[0]-1)-1,+l-1]));
         cur0 = [...cur1];
     }
 }
@@ -367,19 +392,24 @@ sout.on('resize',render);
             }
             else if (c == '\b' || c == '\x7F') backsp();
             else if (c == '\x1b') await openMenu();
-            else if (c == '\x1b[A') move_cursor(0,-1);
-            else if (c == '\x1b[B') move_cursor(0,1);
-            else if (c == '\x1b[C') move_cursor(1,0);
-            else if (c == '\x1b[D') move_cursor(-1,0);
-            else if (c == '\x1b[1;2A') move_cursor(0,-1,1);
-            else if (c == '\x1b[1;2B') move_cursor(0,1,1);
-            else if (c == '\x1b[1;2C') move_cursor(1,0,1);
-            else if (c == '\x1b[1;2D') move_cursor(-1,0,1); 
+            else if (c == '\x1b[A') move_cursor( 0,-1);
+            else if (c == '\x1b[B') move_cursor( 0, 1);
+            else if (c == '\x1b[C') move_cursor( 1, 0);
+            else if (c == '\x1b[D') move_cursor(-1, 0);
+            else if (c == '\x1b[1;2A') move_cursor( 0,-1,1);
+            else if (c == '\x1b[1;2B') move_cursor( 0, 1,1);
+            else if (c == '\x1b[1;2C') move_cursor( 1, 0,1);
+            else if (c == '\x1b[1;2D') move_cursor(-1, 0,1); 
+            else if (c == '\x1b[3~') del();
+            else if (c == '\x1b[1~') move_cursor(-Infinity,0);
+            else if (c == '\x1b[4~') move_cursor( Infinity,0);
+            else if (c == '\x1b[1;2~') move_cursor(-Infinity,0,1);
+            else if (c == '\x1b[4;2~') move_cursor( Infinity,0,1);
             else if (c.charCodeAt() < 0x1A) { // Ctrl+[key]
                 let k = String.fromCharCode(c.charCodeAt()+64);
                 if (k == 'X') break;
                 if (k == 'G') {
-                    await openMenu(':');
+                    await openMenu('g');
                 }
             }
             else {
