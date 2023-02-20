@@ -42,9 +42,11 @@ let filename = noFile;
  */
 async function DSR() {
     process.stdout.write(`\x1b[6n`);
-    return Array.from((await getch('utf-8')).match(/\x1b\[(\d*);(\d*)R/)).slice(1).map(n=>+(n|'0'));
+    let c;
+    while (!c) c = (await getch('utf-8')).match(/\x1b\[(\d*);(\d*)R/);
+    return Array.from(c).slice(1).map(n=>+(n|'0'));
 }
-const getch = function(encoding='utf-8',stdin=process.stdin) {
+const getch = function(encoding='utf-8',stdin=sin) {
     return new Promise(
         r => {
 
@@ -148,10 +150,10 @@ async function input(prompt,x,y,replace,defaultValue,placeHolder='',exitChars=''
         process.stdout.write(prePrompt  + (typeof prompt == 'function' ? prompt(value) : prompt) + value);
     }
     while (true) {
-        let ch = await getch('utf-8',()=>Key.ctrl.c,()=>Key.ctrl.d);
+        let ch = await getch('utf-8');
         let oc = cur;
         if (ch == '\r' || exitChars.includes(ch)) {
-        } else if (ch == Key.backspace) {
+        } else if (ch == '\b' || ch == '\x7F') {
             val = val.slice(0,cur-1) + val.slice(cur);
             cur = Math.max(0, cur-1);
         } else if (ch == Key.left) {
@@ -166,35 +168,39 @@ async function input(prompt,x,y,replace,defaultValue,placeHolder='',exitChars=''
             val = val.slice(0,cur) + val.slice(cur+1);
         } else if (Object.values(Key.shift).concat(Object.values(Key.ctrl),Object.values(Key.ctrl_shift)).includes(ch)) {
         } else {
-            let v = stripVTCC(ch);
+            let v = util.stripVTControlCharacters(ch);
             val = val.slice(0,cur) + v + val.slice(cur);
             cur += v.length;
         }
         let prePrompt = (typeof x == 'number' && typeof x == typeof y) ? `\x1b[${y};${x}H` : `${(oc+(typeof prompt == 'function' ? prompt(val) : prompt).length)?`\x1b[${oc+(typeof prompt == 'function' ? prompt(val) : prompt).length}D`:''}`;
         let value  = ( typeof replace == 'function' ? await replace(val) : val );
-            value += ( !val.length ? placeHolder||'' : value.length-stripVTCC(placeHolder).length>0 ? ' '.repeat(value.length-stripVTCC(placeHolder).length) : '' );
+            value += ( !val.length ? placeHolder||'' : value.length-util.stripVTControlCharacters(placeHolder).length>0 ? ' '.repeat(value.length-util.stripVTControlCharacters(placeHolder).length) : '' );
         let resetPos = `\x1b[${(await DSR()).join(';')}H`;
         await update(val,ch);
-        process.stdout.write(resetPos + prePrompt + (typeof prompt == 'function' ? await prompt(val) : prompt) + value + ((ch == '\b' || ch == '\x1b[3~')?' ':'') + ((ch != '\r') ? `\x1b[${(stripVTCC(value).length-cur+(ch == '\b' || ch == '\x1b[3~'))?`\x1b[${stripVTCC(value).length-cur+(ch == '\b' || ch == '\x1b[3~')}D`:''}` : ''));
+        process.stdout.write(resetPos + prePrompt + (typeof prompt == 'function' ? await prompt(val) : prompt) + value + ((ch == '\b' || ch == '\x7F' || ch == '\x1b[3~')?' ':'') + ((ch != '\r') ? `\x1b[${(util.stripVTControlCharacters(value).length-cur+(ch == '\b' || ch == '\x7F' || ch == '\x1b[3~'))?`\x1b[${util.stripVTControlCharacters(value).length-cur+(ch == '\b' || ch == '\x7F' || ch == '\x1b[3~')}D`:''}` : ''));
         if (ch == '\r') {
             process.stdout.write('\n');
             return val;
         }
         if (exitChars.includes(ch)) {
-            return CancelChar;
+            return input.cancel;
         }
     }
 }
+input.cancel = Symbol('CANCEL');
 
 function render() {
     let visibleLines = Array(process.stdout.rows-3).fill('');
     let lines = getlines();
     for (let i = 0; i < visibleLines.length; i++) {
-        visibleLines[i] = lines[i+vscroll] ?? '\x1b[90m~\x1b[m';
+        visibleLines[i] = Array.from(lines[i+vscroll] ?? ['\x1b[90m~\x1b[39m']);
     }
     let modified = b_hash() != bb_hash;
     let middle_txt = `${filename==noFile?`\x1b[36m${filename.description}\x1b[39m`:filename}${modified?'\x1b[33m*\x1b[39m':''}`;
     let curr = ccurfn(icur1());
+    let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}] ${cur0.join(':')}`;
+    let i0 = Math.min(icur0(),icur1());
+    let i1 = Math.max(icur0(),icur1());
     let cp = [
         curr[1]+2-vscroll,
         curr[0]+6-hscroll
@@ -202,23 +208,21 @@ function render() {
     let buffer = 
         `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns)?'l':'h') +
         `\x1b[H\x1b[K\x1b[40m` +
-        `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` + 
-        visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')} ${Array.from(l).map((c,ci)=>(Math.min(cur1[0],cur0[0])==ci&&Math.min(cur1[1],cur0[1])==li?'\x1b[7m':'')+(Math.max(cur1[0],cur0[0])==ci&&Math.max(cur1[1],cur0[1])==li?'\x1b[27m':'')+c).join('')}`)).join('\n') + 
-        `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit`+ 
+        `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
+        visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')} ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
+        `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
         `\n\x1b[40m\x1b[K`+
         `\x1b[${cp.join(';')}H`
     ;
     sout.write(buffer);
-    adjust_view();
 }
 
 function adjust_view() {
-    let viewable_range = [vscroll,Math.min(process.stdout.rows+vscroll-2)];
-    if (cur1[1] >= viewable_range[1]-2) {
-        vscroll = cur1[1]+1;
+    while (cur1[1] >= Math.min(process.stdout.rows+vscroll-2)-1) {
+        vscroll++;
     }
-    if (cur1[1] < viewable_range[0]) {
-        vscroll = cur1[1]-process.stdout.rows-2;
+    while (cur1[1] < vscroll) {
+        vscroll--;
     }
 }
 
@@ -235,6 +239,7 @@ function write(v,s=false) {
         cur1 = ccurfn(c0+v.length);
         cur0 = [...cur1];
     }
+    adjust_view();
 }
 
 function backsp() {
@@ -242,21 +247,69 @@ function backsp() {
         c1 = Math.max(icur0(),icur1());
     if (c0 != c1) {
         buff = buff.slice(0,c0  ) + buff.slice(c1);
+        cur1 = ccurfn(Math.min(c0,c1));
+        cur0 = [...cur1];
     }
     else {
         buff = buff.slice(0,Math.max(0,c0-1)) + buff.slice(c1);
         cur1 = ccurfn(c0-1);
         cur0 = [...cur1];
     }
+    adjust_view();
 }
 
-function move_cursor(dr,dc,shift) {
-    if (shift) {
-
+function move_cursor(dc,dr,mod) {
+    if (mod == 1) { // shift
+        if (dc) {
+            cur1 = ccurfn(icur1()+dc);
+        }
+        if (dr) {
+            cur1 = [cur1[0],Math.min(getlines().length,Math.max(0,cur1[1]+dr))];
+        }
+        adjust_view();
+    } else if (mod == 2) { // ctrl
+        vscroll += dr;
+        hscroll += dc;
     } else {
-        cur1 = [cur1[0]+dr,cur1[1]+dc];
-        cur0 = [...cur1];
+        if (dc) {
+            cur1 = ccurfn(icur1()+dc);
+            cur0 = [...cur1];
+        }
+        if (dr) {
+            cur1 = [cur1[0],Math.min(getlines().length,Math.max(0,cur1[1]+dr))];
+            cur0 = [...cur1];
+        }
+        adjust_view();
     }
+}
+
+async function openMenu(pre='') {
+    let width = sout.columns-10;
+    let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
+    sout.write(`\x1b[${org.join(';')}H${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
+    let cmd = await input('',org[1]+1,org[0]+1,
+        /**
+         * @param {string} s
+         */
+        s => {
+            if (s.startsWith(':')) {
+                let m = 0;
+                return '\x1b[40m\x1b[35m:\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
+                    v => 
+                        (v.match(/\d+/) ? 
+                            '\x1b[34m':
+                            v==':' ? 
+                                m++==0 ? 
+                                    '\x1b[90m':
+                                    '\x1b[31m':
+                                '\x1b[31m') +
+                        v+'\x1b[39m'   
+                );
+            }
+            return v;
+        },
+    pre,'','\x1B\x18 ');
+    if (cmd == input.cancel) return;
 }
 
 let processExitHandler = () => {   
@@ -265,7 +318,10 @@ let processExitHandler = () => {
 }
 
 process.on('exit',processExitHandler);
-process.on('uncaughtException',processExitHandler);
+process.on('uncaughtException',e=>{
+    sout.write('\x1b[?1049l\x1b[2J\x1b[G');
+    console.log(e);
+});
 process.on('SIGABRT',processExitHandler);
 process.on('SIGTERM',processExitHandler);
 process.on('SIGINT',()=>{});
@@ -284,14 +340,21 @@ process.on('SIGUSR2',processExitHandler);
             //console.log(util.inspect(c));
             if (c == '\r') write('\n');
             else if (c == '\b' || c == '\x7F') backsp();
-            else if (c == '\x1b') null; // maybe menu key ?
+            else if (c == '\x1b') await openMenu();
             else if (c == '\x1b[A') move_cursor(0,-1);
             else if (c == '\x1b[B') move_cursor(0,1);
             else if (c == '\x1b[C') move_cursor(1,0);
             else if (c == '\x1b[D') move_cursor(-1,0);
-            else if (c.charCodeAt() < 0x1A) {
+            else if (c == '\x1b[1;2A') move_cursor(0,-1,1);
+            else if (c == '\x1b[1;2B') move_cursor(0,1,1);
+            else if (c == '\x1b[1;2C') move_cursor(1,0,1);
+            else if (c == '\x1b[1;2D') move_cursor(-1,0,1); 
+            else if (c.charCodeAt() < 0x1A) { // Ctrl+[key]
                 let k = String.fromCharCode(c.charCodeAt()+64);
                 if (k == 'X') break;
+                if (k == 'G') {
+                    await openMenu(':');
+                }
             }
             else {
                 let wv = util.stripVTControlCharacters(c);
