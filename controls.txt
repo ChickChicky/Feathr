@@ -1,0 +1,21 @@
+KEY:
+    Arrow keys to move the cursor, hold shift when moving to start slecting.
+    Home / End keys to go to the beginning / end of the line, home will bring you after the tabulation of the line, press it again to go to the actual start of the line.
+    Enter auto-indents based on the indentation level of the previous line (not perfect but works, ig ?)
+    Escape cancels selection
+
+Ctrl+KEY:
+    Ctrl+X : Exit
+    Ctrl+G : Goto pos, might be removed, basically the same as pressing  Ctrl+C and then 'g'
+    Ctrl+C : Open 'menu' - more like command center -
+    Ctrl+B : View all the active buffers
+
+Commands:
+    g<l>[:<c>] : goto line 'l', column 'c' (if provided) 
+        g10    : goes to line 10
+        g10:20 : goes to line 10 and column 20
+    c[c][$] : copies text, the '$' specifies whether it should append to the yank buffer rather than replacing it
+        c  : copies the current selected text to the yank buffer
+        cc : copies the current line to the yank buffer
+    x[x][$] : same as above, but cuts insted of copying
+    p : pastes the contents of the yank buffer at the current cursor location
