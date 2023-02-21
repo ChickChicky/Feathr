@@ -8,6 +8,27 @@ const sout = process.stdout;
 const sin  = process.stdin;
 
 let buff = '';
+let bf   = [];
+let cb   = 0;
+let alt_buffers = [
+    {
+        filename: noFile,
+        cur0: [0,0],
+        cur1: [0,0],
+        vscroll: 0,
+        hscroll: 0,
+        buff: ''
+    },
+    {
+        _ro : true,
+        filename: 'yank',
+        cur0: [0,0],
+        cur1: [0,0],
+        vscroll: 0,
+        hscroll: 0,
+        buff: ''
+    }
+]
 let getlines = ()=>buff.split(/\r?\n/g);
 
 let b_hash  = () => hash(buff);
@@ -212,7 +233,7 @@ function render() {
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
         visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll==curr[1]?'\x1b[7m':'')+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
-        `\n\x1b[40m\x1b[K\x1b[31m^\x1b[39m  Menu  `+
+        `\n\x1b[40m\x1b[K\x1b[31m^\x1b[39m  Menu  \x1b[31m^B\x1b[39m Buffers`+
         `\x1b[${cp.join(';')}H`
     ;
     sout.write(buffer);
@@ -242,6 +263,7 @@ function adjust_view() {
  * @param {bool}   s whether the cursor should stay in place
  */
 function write(v,s=false) {
+    if (!bf.includes('_ro'));
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
     buff = buff.slice(0,c0) + v + buff.slice(c1);
@@ -253,6 +275,7 @@ function write(v,s=false) {
 }
 
 function backsp() {
+    if (!bf.includes('_ro'));
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
     if (c0 != c1) {
@@ -269,6 +292,7 @@ function backsp() {
 }
 
 function del() {
+    if (!bf.includes('_ro'));
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
     if (c0 != c1) {
@@ -354,6 +378,30 @@ async function openMenu(pre='') {
     }
 }
 
+async function bufferMenu() {
+    let cur = 0;
+    function render() {
+        let l = Array(process.stdout.rows-3).fill('');
+        let middle_txt = `Buffer Selection`;
+        let buffer = 
+            `\x1b[H\x1b[K\x1b[40m` +
+            `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
+            l.map(ll=>`\x1b[K${ll}`).join('\n') +
+            `\n\x1b[40m\x1b[K\x1b[31m^ \x1b[39m Close`+ 
+            `\n\x1b[40m\x1b[K`
+        ;
+        sout.write(buffer);
+    }
+    while (true) {
+        render();
+        let c = await getch();
+        if (c == '\r') {
+            
+        }
+        if (c == '\x1b') return;
+    }
+}
+
 let processExitHandler = () => {   
     sout.write('\x1b[?1049l\x1b[?25h\x1B[0 q'); // leaves alternative screen buffer
     process.exit();
@@ -401,16 +449,15 @@ sout.on('resize',render);
             else if (c == '\x1b[1;2C') move_cursor( 1, 0,1);
             else if (c == '\x1b[1;2D') move_cursor(-1, 0,1); 
             else if (c == '\x1b[3~') del();
-            else if (c == '\x1b[1~') move_cursor(-Infinity,0);
-            else if (c == '\x1b[4~') move_cursor( Infinity,0);
+            else if (c == '\x1b[1~' || c == '\x1b[H') move_cursor(-Infinity,0);
+            else if (c == '\x1b[4~' || c == '\x1b[F') move_cursor( Infinity,0);
             else if (c == '\x1b[1;2~') move_cursor(-Infinity,0,1);
             else if (c == '\x1b[4;2~') move_cursor( Infinity,0,1);
             else if (c.charCodeAt() < 0x1A) { // Ctrl+[key]
                 let k = String.fromCharCode(c.charCodeAt()+64);
                 if (k == 'X') break;
-                if (k == 'G') {
-                    await openMenu('g');
-                }
+                if (k == 'G') await openMenu('g');
+                if (k == 'B') await bufferMenu();
             }
             else {
                 let wv = util.stripVTControlCharacters(c);
