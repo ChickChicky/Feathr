@@ -20,4 +20,5 @@ Commands:
         cc : copies the current line to the yank buffer
     x[x][$][$] : same as above, but cuts insted of copying
     p : pastes the contents of the yank buffer at the current cursor location
-    /<str>     : moves the cursor to the first occurence of <str> from the cursor, skipping the first one if the cursor is placed at the beginning of one match
+    /[<flags>/]<str>     : moves the cursor to the first occurence of <str> from the cursor, skipping the first one if the cursor is placed at the beginning of one match, and some flags can be povided to chenge a bit how the term is searched
+        i : makes the search case-insensitive
