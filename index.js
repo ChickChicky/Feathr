@@ -24,7 +24,7 @@ let b = {
 {
     let f = process.argv.slice(2).filter(a=>!a.startsWith('-'))[0];
     if (f && fs.existsSync(f)) {
-        b.buff = fs.readFileSync(f,'utf-8');
+        b.buff = fs.readFileSync(f,'utf-8').replace(/\r\n/g,'\n');
         b.bb_hash = hash(b.buff);
         b.filename = path.basename(f);
         b.filepath = f;
@@ -50,7 +50,7 @@ let alt_buffers = [
     }
 ];
 
-let getlines = ()=>b.buff.split(/\r?\n/g);
+let getlines = ()=>b.buff.split(/\n/g);
 let current_buffer = ()=>alt_buffers[cb];
 let yank_buff = ()=>alt_buffers.find(b=>b._internal&&b.filename=='yank');
 
@@ -245,7 +245,7 @@ function render() {
         `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h') +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[K`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>((c0[1]>=li&&c1[1]<=li&&(c1[1]!=li||c1[0]>ci)&&(c0[1]!=li||c0[0]<=ci))?'\x1b[7m':'')+c+'\x1b[27m').join('')}`)).join('\n') +
+        visibleLines.map((l,li)=>`\x1b[K`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>((c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))?'\x1b[7m':'')+c+'\x1b[27m').join('')}`)).join('\n') +
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
         `\n\x1b[40m\x1b[K\x1b[31m^C\x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers`+
         `\x1b[${cp.join(';')}H`
@@ -581,7 +581,7 @@ sout.on('resize',render);
                 if (k == 'S') await saveFile();
             }
             else {
-                let wv = util.stripVTControlCharacters(c).replace(/\x1B/g,'');
+                let wv = util.toUSVString(util.stripVTControlCharacters(c).replace(/[\x1B\0]/g,'').replace(/\r\n/g,'\n'));
                 if (wv.length) write(wv);
             }
         }
