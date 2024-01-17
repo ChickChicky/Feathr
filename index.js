@@ -525,7 +525,7 @@ async function bufferMenu() {
 }
 
 async function saveFile() {
-    if (b.filename) {
+    if (b.filepath) {
         try { fs.accessSync(f,fs.constants.W_OK); b._ro = false }
         catch { b._ro = true }
     }
