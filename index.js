@@ -227,21 +227,25 @@ function render() {
         let rl = Array.from(lines[i+b.vscroll] ?? ['\x1b[90m~\x1b[39m']);
         visibleLines[i] = rl.slice(b.hscroll,b.hscroll+sout.columns-5);
     }
+    let ri0 = icur0();
+        ri1 = icur1();
     let modified = b._ro ? false : (b_hash() != b.bb_hash);
     let middle_txt = `${b.filename}${modified?'\x1b[33m*\x1b[39m':''} ${b._ro?'\x1b[33m(read only)\x1b[39m':''}`;
-    let curr = ccurfn(icur1());
+    let curr = ccurfn(ri1);
     let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}]`;
-    let i0 = Math.min(icur0(),icur1());
-    let i1 = Math.max(icur0(),icur1());
+    let i0 = Math.min(ri0,ri1);
+    let i1 = Math.max(ri0,ri1);
     let cp = [
         curr[1]+2-b.vscroll,
         curr[0]+6-b.hscroll
     ];
+    let c0 = i0 == ri0 ? b.cur0 : b.cur1,
+        c1 = i1 == ri1 ? b.cur1 : b.cur0;
     let buffer = 
         `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h') +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[K`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
+        visibleLines.map((l,li)=>`\x1b[K`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>((c0[1]>=li&&c1[1]<=li&&(c1[1]!=li||c1[0]>ci)&&(c0[1]!=li||c0[0]<=ci))?'\x1b[7m':'')+c+'\x1b[27m').join('')}`)).join('\n') +
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
         `\n\x1b[40m\x1b[K\x1b[31m^C\x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers`+
         `\x1b[${cp.join(';')}H`
