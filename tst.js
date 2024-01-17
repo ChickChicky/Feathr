@@ -14,3 +14,15 @@ let icurfn = (cur) => {
 }
 
 console.log(ccurfn(1));
+
+const stdout = process.stdout;
+
+// Set the cursor style to underline
+sout.write('\x1B[5 q');
+
+// Wait for 2 seconds
+setTimeout(() => {
+
+  // Reset the cursor style
+  stdout.write('\x1B[0 q');
+}, 2000);

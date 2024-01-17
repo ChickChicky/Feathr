@@ -174,7 +174,7 @@ async function input(prompt,x,y,replace,defaultValue,placeHolder='',exitChars=''
         }
         let prePrompt = (typeof x == 'number' && typeof x == typeof y) ? `\x1b[${y};${x}H` : `${(oc+(typeof prompt == 'function' ? prompt(val) : prompt).length)?`\x1b[${oc+(typeof prompt == 'function' ? prompt(val) : prompt).length}D`:''}`;
         let value  = ( typeof replace == 'function' ? await replace(val) : val );
-            value += ( !val.length ? placeHolder||'' : value.length-util.stripVTControlCharacters(placeHolder).length>0 ? ' '.repeat(value.length-util.stripVTControlCharacters(placeHolder).length) : '' );
+            value += ( !val.length ? placeHolder||'' : value.length-util.stripVTControlCharacters(placeHolder).length>0 ? ' '.repeat(util.stripVTControlCharacters(value).length-util.stripVTControlCharacters(placeHolder).length) : '' );
         let resetPos = `\x1b[${(await DSR()).join(';')}H`;
         await update(val,ch);
         process.stdout.write(resetPos + prePrompt + (typeof prompt == 'function' ? await prompt(val) : prompt) + value + ((ch == '\b' || ch == '\x7F' || ch == '\x1b[3~')?' ':'') + ((ch != '\r') ? `\x1b[${(util.stripVTControlCharacters(value).length-cur+(ch == '\b' || ch == '\x7F' || ch == '\x1b[3~'))?`\x1b[${util.stripVTControlCharacters(value).length-cur+(ch == '\b' || ch == '\x7F' || ch == '\x1b[3~')}D`:''}` : ''));
@@ -193,7 +193,8 @@ function render() {
     let visibleLines = Array(process.stdout.rows-3).fill('');
     let lines = getlines();
     for (let i = 0; i < visibleLines.length; i++) {
-        visibleLines[i] = Array.from(lines[i+vscroll] ?? ['\x1b[90m~\x1b[39m']);
+        let rl = Array.from(lines[i+vscroll] ?? ['\x1b[90m~\x1b[39m']);
+        visibleLines[i] = rl.slice(hscroll,hscroll+sout.columns-5);
     }
     let modified = b_hash() != bb_hash;
     let middle_txt = `${filename==noFile?`\x1b[36m${filename.description}\x1b[39m`:filename}${modified?'\x1b[33m*\x1b[39m':''}`;
@@ -206,10 +207,10 @@ function render() {
         curr[0]+6-hscroll
     ];
     let buffer = 
-        `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns)?'l':'h') +
+        `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h') +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')} ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
+        visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll==curr[1]?'\x1b[7m':'')+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
         `\n\x1b[40m\x1b[K`+
         `\x1b[${cp.join(';')}H`
@@ -218,11 +219,20 @@ function render() {
 }
 
 function adjust_view() {
+    // Y adjust
     while (cur1[1] >= Math.min(process.stdout.rows+vscroll-2)-1) {
         vscroll++;
     }
     while (cur1[1] < vscroll) {
         vscroll--;
+    }
+
+    // X adjust
+    while (cur1[0] >= Math.min(process.stdout.columns+hscroll-3)-1) {
+        hscroll++;
+    }
+    while (cur1[0] < hscroll) {
+        hscroll--;
     }
 }
 
@@ -294,32 +304,39 @@ async function openMenu(pre='') {
         s => {
             if (s.startsWith(':')) {
                 let m = 0;
-                return '\x1b[40m\x1b[35m:\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
+                return '\x1b[107m\x1b[35m:\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
                     v => 
-                        (v.match(/\d+/) ? 
-                            '\x1b[34m':
-                            v==':' ? 
-                                m++==0 ? 
+                        (v.match(/^\d+$/) ? 
+                            m < 2 ?
+                                '\x1b[34m':
+                                '\x1b[31m':
+                            v == ':' ? 
+                                m++ ==0  ? 
                                     '\x1b[90m':
                                     '\x1b[31m':
                                 '\x1b[31m') +
                         v+'\x1b[39m'   
                 );
             }
-            return v;
+            return '\x1b[30;107m'+s;
         },
     pre,'','\x1B\x18 ');
     if (cmd == input.cancel) return;
+    if (cmd.match(/^:(\d+)(?::(\d+))?$/)) {
+        let [,l,c] = cmd.match(/^:(\d+)(?::(\d+))?$/);
+        cur1 = ccurfn(icurfn([+l,(+c)??cur1[1]]));
+        cur0 = [...cur1];
+    }
 }
 
 let processExitHandler = () => {   
-    sout.write('\x1b[?1049l\x1b[?25h'); // leaves alternative screen buffer
+    sout.write('\x1b[?1049l\x1b[?25h\x1B[0 q'); // leaves alternative screen buffer
     process.exit();
 }
 
 process.on('exit',processExitHandler);
 process.on('uncaughtException',e=>{
-    sout.write('\x1b[?1049l\x1b[2J\x1b[G');
+    sout.write('\x1b[?1049l\x1b[2J\x1b[G\x1B[0 q');
     console.log(e);
 });
 process.on('SIGABRT',processExitHandler);
@@ -328,9 +345,12 @@ process.on('SIGINT',()=>{});
 process.on('SIGUSR1',processExitHandler);
 process.on('SIGUSR2',processExitHandler);
 
+sout.on('resize',render);
+
 {(async()=>{
 
-    sout.write('\x1b[?1049h\x1b[H'); // enters alternative screen buffer
+
+    sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
     sout.write('\x1b]0;Feathr\7'); // window title
 
     try {
@@ -338,7 +358,13 @@ process.on('SIGUSR2',processExitHandler);
             render();
             let c = await getch();
             //console.log(util.inspect(c));
-            if (c == '\r') write('\n');
+            if (c == '\r') {
+                let i = Array.from(getlines()[ccurfn(icur1())[1]].match(/^\s*/))[0].length;
+                write('\n'+' '.repeat(i));
+            }
+            else if (c == '\t') {
+                write(' '.repeat(4));
+            }
             else if (c == '\b' || c == '\x7F') backsp();
             else if (c == '\x1b') await openMenu();
             else if (c == '\x1b[A') move_cursor(0,-1);
