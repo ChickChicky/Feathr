@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const util = require('node:util');
 const crypto = require('node:crypto');
+const path = require('node:path');
 
 const hash =   d   => crypto.createHash('sha1').update(d).digest('hex');
 const mod  = (a,b) => ((a%b)+b)%b;
@@ -17,10 +18,20 @@ let b = {
     buff: '',
     filename: 'new buffer',
     filepath: null,
+    bb_hash:  hash('')
+}
+
+{
+    let f = process.argv.slice(2).filter(a=>!a.startsWith('-'))[0];
+    if (f && fs.existsSync(f)) {
+        b.buff = fs.readFileSync(f,'utf-8');
+        b.bb_hash = hash(b.buff);
+        b.filename = path.basename(f);
+        b.filepath = f;
+    }
 }
 
 let b_hash  = () => hash(b.buff);
-let bb_hash = b_hash();
 
 let alt_buffers = [
     b,
@@ -216,7 +227,7 @@ function render() {
         let rl = Array.from(lines[i+b.vscroll] ?? ['\x1b[90m~\x1b[39m']);
         visibleLines[i] = rl.slice(b.hscroll,b.hscroll+sout.columns-5);
     }
-    let modified = b._ro ? false : (b_hash() != bb_hash);
+    let modified = b._ro ? false : (b_hash() != b.bb_hash);
     let middle_txt = `${b.filename}${modified?'\x1b[33m*\x1b[39m':''} ${b._ro?'\x1b[33m(read only)\x1b[39m':''}`;
     let curr = ccurfn(icur1());
     let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}]`;
@@ -483,6 +494,23 @@ async function bufferMenu() {
     sout.off('resize',render);
 }
 
+async function saveFile() {
+    if (b._internal || b._ro) return;
+    if (!b.filepath) {
+        let width = sout.columns-10;
+        let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
+        sout.write(`\x1b[${org.join(';')}H${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
+        let fp = await input('',org[1]+1,org[0]+1);
+        if (fp == input.cancel) return;
+        if (fs.existsSync(path.dirname(fp))) {
+            b.filepath = path.resolve(fp);
+            b.filename = path.basename(fp);
+        }
+    }
+    fs.writeFileSync(b.filepath,b.buff);
+    b.bb_hash = b_hash();
+}
+
 let processExitHandler = () => {   
     sout.write('\x1b[?1049l\x1b[?25h\x1B[0 q'); // leaves alternative screen buffer
     process.exit();
@@ -546,6 +574,7 @@ sout.on('resize',render);
                 if (k == 'C') await openMenu();
                 if (k == 'G') await openMenu('g');
                 if (k == 'B') await bufferMenu();
+                if (k == 'S') await saveFile();
             }
             else {
                 let wv = util.stripVTControlCharacters(c).replace(/\x1B/g,'');
