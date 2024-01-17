@@ -14,6 +14,10 @@ const theme = {
     operator: '\x1b[38;2;51;51;51m',
     comment: '\x1b[38;2;106;153;85m',
     highlight: '\x1b[44m',
+
+    markdown_bold:   '\x1b[38;2;86;156;214m\x1b[1m',
+    markdown_italic: '\x1b[3m',
+
     background: '\x1b[48;2;31;31;31m'
 }
 
@@ -40,7 +44,7 @@ const modules = fs
             let mod = require(path.resolve(e[ModulePathSymbol],e[ModuleSettingsSymbol].main));
             Object.assign(e,mod);
             return e;
-        } catch { return null }
+        } catch (e) { console.log(`ERROR while loading extension: \n`,e); return null }
     })
     .filter(e=>e!=null);
 
@@ -60,7 +64,7 @@ let b = {
     filename: 'new buffer',
     filepath: null,
     bb_hash:  hash(''),
-    langid: 'nugget-script',
+    langid: 'markdown',
 }
 
 { // loads a file if one has been provided
@@ -297,7 +301,7 @@ function render() {
         `\x1b[?25l` +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[G${theme.background}`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>theme.background+(styles.length?(theme[(styles.find(s=>inrange(li,ci,s.p0,s.p1))??{}).s]??''):'')+(inrange(li,ci,c0,c1)/*(c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))*/?'\x1b[7m':'')+c+'\x1b[m').join('')}${theme.background}\x1b[K`)).join('\n') +
+        visibleLines.map((l,li)=>`\x1b[G${theme.background}`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>theme.background+(styles.filter(s=>inrange(li,ci,s.p0,s.p1)).map(s=>theme[s.s]).join(''))+(inrange(li,ci,c0,c1)/*(c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))*/?'\x1b[7m':'')+c+'\x1b[m').join('')}${theme.background}\x1b[K`)).join('\n') +
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
         `\n\x1b[40m\x1b[K\x1b[31m^C\x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers`+
         `\x1b[${cp.join(';')}H` +
