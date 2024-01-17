@@ -1,8 +1,10 @@
 [ ] - File explorer
 [ ] - Settings
 [ ] - Open multiple files
-[ ] - Keep a running instance so that when it is launched it can be claused and opened back and keep all files in the same state
+[ ] - Save the buffers upon exit to start back where the work was left
 [ ] - Have multiple language ids for a single extension
 [ ] - Color theme extensions
 [ ] - Diagnostics
 [ ] - Autocompletion suggestions
+[ ] - Fix `input` creating a huge amount of unnecessary spaces
+[ ] - Add a way to create custom behaviour for buffers, and thus turn the buffers view into an actual buffer that wouldn't be shown but could still be accessed with commands

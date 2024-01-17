@@ -5,7 +5,7 @@ const path = require('node:path');
 
 var quit = false;
 
-const theme = {
+const theme_default = Object.freeze({
     function: '\x1b[38;2;220;220;170m',
     name: '\x1b[38;2;156;220;254m',
     control_keyword: '\x1b[38;2;197;134;192m',
@@ -24,7 +24,13 @@ const theme = {
     markdown_italic: '\x1b[3m',
 
     background: '\x1b[48;2;31;31;31m'
-}
+});
+
+var theme = {...theme_default};
+
+var settings = {
+    theme: 'atom'
+};
 
 function safeJSON(str) {
     try {
@@ -38,8 +44,7 @@ safeJSON.Error = Symbol('JSON parsing error');
 const ModuleSettingsSymbol = Symbol('Module Settings');
 const ModulePathSymbol = Symbol('Module Path');
 
-const modules = fs
-    .readdirSync(path.resolve(__dirname,'extensions'))
+const modules = fs.readdirSync(path.resolve(__dirname,'extensions'))
     .map(p=>path.resolve(__dirname,'extensions',p))
     .filter(p=>fs.existsSync(path.join(p,'extension.json')))
     .map(p=>({[ModulePathSymbol]:p,[ModuleSettingsSymbol]:safeJSON(fs.readFileSync(path.resolve(p,'extension.json')))}))
@@ -51,11 +56,27 @@ const modules = fs
                 Object.assign(e,mod);
                 return e;
             }
+            if (e[ModuleSettingsSymbol].themes) {
+                let mod = {
+                    themes: Object.fromEntries(Object.entries(e[ModuleSettingsSymbol].themes).map(([tid,t])=>{
+                        try {
+                            let p = path.resolve(e[ModulePathSymbol],t.path?t.path:tid+'.theme.json');
+                            let theme = JSON.parse(fs.readFileSync(p,'utf-8'));
+                            return [tid,theme];
+                        } catch {
+                            return null;
+                        }
+                    }).filter(e=>e))
+                }
+                Object.assign(e,mod);
+                return e;
+            }
         } catch (e) { console.log(`Error while loading extension: \n`,e); return null }
     })
-    .filter(e=>e!=null);
+    .filter(e=>e!=null)
+;
 
-const hash =   d   => crypto.createHash('sha1').update(d).digest('hex');
+const hash =   d   => crypto.createHash('md5').update(d).digest('hex');
 const mod  = (a,b) => ((a%b)+b)%b;
 
 const sout = process.stdout;
@@ -71,7 +92,7 @@ let b = {
     filename: 'new buffer',
     filepath: null,
     bb_hash:  hash(''),
-    langid: 'epu2-asm',
+    langid: 'markdown',
 }
 
 { // loads a file if one has been provided
@@ -308,6 +329,21 @@ function languageUpdate() {
     let lang = (modules.map(m=>m[ModuleSettingsSymbol].contributes).filter(m=>Array.isArray(m)&&m.length).flat().find(m=>globMatch(b.filepath,m.matches)||globMatch(path.basename(b.filepath),m.matches))??{})['lang-id'];
     b.langid = lang ?? 'plain-text';
     postLanguageUpdate();
+}
+
+function themeUpdate() {
+    let t = null;
+    for (let mod of modules) if (typeof mod?.themes == 'object') {
+        for (let [theme_id,theme] of Object.entries(mod.themes)) {
+            if (theme_id == settings.theme) {
+                t = theme;
+                break;
+            }
+        }
+    }
+    if (t == null) return false;
+    theme = t;
+    return true;
 }
 
 function render() {
@@ -617,7 +653,7 @@ async function openMenu(pre='') {
                 }
             }
         }
-    ];
+    ]
 
     let res = await input('',org[1]+1,org[0]+1,
         /**
@@ -702,9 +738,17 @@ async function saveFile() {
     if (b._ro) return;
     if (!b.filepath) {
         let width = sout.columns-10;
-        let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
-        sout.write(`\x1b[${org.join(';')}H${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
+        /*let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
+        sout.write(`\x1b[${org.join(';')}H Save${' '.repeat(width-5)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
         let fp = await input('',org[1]+1,org[0]+1,undefined,undefined,undefined,'\x1B\x18');
+        if (fp == input.cancel) return;
+        if (fs.existsSync(path.dirname(fp))) {
+            b.filepath = path.resolve(fp);
+            b.filename = path.basename(fp);
+        }*/
+        let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)];
+        process.stdout.write(`\x1b[${process.stdout.rows-1};H\x1b[JSave Path:\n  `);
+        let fp = await input('',3,process.stdout.rows,s=>`\x1b[36m${s}\x1b[39m`,undefined,undefined,'\x0C\x1B\x18');
         if (fp == input.cancel) return;
         if (fs.existsSync(path.dirname(fp))) {
             b.filepath = path.resolve(fp);
@@ -745,10 +789,10 @@ sout.on('resize',render);
 {(async()=>{
     
     languageUpdate();
+    themeUpdate();
 
     sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
     sout.write('\x1b]0;Feathr\x07'); // window title
-
 
     let inbuff = '';
 
