@@ -779,8 +779,8 @@ sout.on('resize',render);
                 else if (matches('\x1b[3~')) del();
                 else if (matches('\x1b[1~') || matches('\x1b[H')) move_cursor(-Infinity,0);
                 else if (matches('\x1b[4~') || matches('\x1b[F')) move_cursor( Infinity,0);
-                else if (matches('\x1b[1;2~')) move_cursor(-Infinity,0,1);
-                else if (matches('\x1b[4;2~')) move_cursor( Infinity,0,1);
+                else if (matches('\x1b[1;2~') || matches('\x1b[1;2H')) move_cursor(-Infinity,0,1);
+                else if (matches('\x1b[4;2~') || matches('\x1b[1;2F')) move_cursor( Infinity,0,1);
                 else if (c == '\r') {
                     let i = Array.from(getlines()[ccurfn(icur1())[1]].match(/^\s*/))[0].length;
                     write('\n'+' '.repeat(i));
@@ -814,6 +814,9 @@ sout.on('resize',render);
                     if (k == 'G') await openMenu(':');
                     if (k == 'B') await bufferMenu();
                     if (k == 'S') await saveFile();
+                }
+                else if (inbuff.match(/\x1b\[.+$/g)) {
+                    i = inbuff.match(/\x1b\[.+$/g)[0].length;
                 }
                 else {
                     let wv = util.toUSVString(util.stripVTControlCharacters(c.replace(/[\x1B\0]/g,'').replace(/\r\n/g,'\n')));
