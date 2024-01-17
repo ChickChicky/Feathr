@@ -278,8 +278,19 @@ async function input(prompt,x,y,replace,defaultValue,placeHolder='',exitChars=''
 }
 input.cancel = Symbol('CANCEL');
 
-function globMatch() {
-
+/**
+ * @param {string} p
+ * @param {RegExp} pattern
+ */
+function globMatch(p, pattern) {
+    let parts = pattern.split(/\*/g);
+    let li = 0;
+    for (let pt of parts) {
+        let i = p.indexOf(pt,li);
+        if (i == -1) return false;
+        li = i + pt.length;
+    }
+    return li == p.length;
 }
 
 var rf = null;
@@ -292,7 +303,7 @@ function postLanguageUpdate() {
 }
 
 function languageUpdate() {
-    let lang = (modules.map(m=>m.contributes).filter(m=>Array.isArray(m)&&m.length).flat().find(m=>globMatch(b.filepath,m.matches)||globMatch(path.basename(b.filepath),m.matches))??{})['lang-id'];
+    let lang = (modules.map(m=>m[ModuleSettingsSymbol].contributes).filter(m=>Array.isArray(m)&&m.length).flat().find(m=>globMatch(b.filepath,m.matches)||globMatch(path.basename(b.filepath),m.matches))??{})['lang-id'];
     b.langid = lang ?? 'plain-text';
     postLanguageUpdate();
 }
@@ -730,12 +741,12 @@ process.on('SIGUSR2',processExitHandler);
 sout.on('resize',render);
 
 {(async()=>{
-
+    
+    languageUpdate();
 
     sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
     sout.write('\x1b]0;Feathr\x07'); // window title
 
-    languageUpdate();
 
     let inbuff = '';
 
