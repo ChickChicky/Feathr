@@ -3,6 +3,8 @@ const util = require('node:util');
 const crypto = require('node:crypto');
 const path = require('node:path');
 
+var quit = false;
+
 const theme = {
     function: '\x1b[38;2;220;220;170m',
     name: '\x1b[38;2;156;220;254m',
@@ -11,8 +13,11 @@ const theme = {
     string: '\x1b[38;2;206;145;120m',
     class: '\x1b[38;2;78;201;176m',
     number: '\x1b[38;2;181;206;168m',
+    number_radix: '\x1b[38;2;128;194;187m',
     operator: '\x1b[38;2;51;51;51m',
     comment: '\x1b[38;2;106;153;85m',
+    const: '\x1b[38;2;79;193;255m',
+
     highlight: '\x1b[44m',
 
     markdown_bold:   '\x1b[38;2;86;156;214m\x1b[1m',
@@ -41,10 +46,12 @@ const modules = fs
     .filter(e=>e[ModuleSettingsSymbol] != safeJSON.Error)
     .map(e=>{
         try {
-            let mod = require(path.resolve(e[ModulePathSymbol],e[ModuleSettingsSymbol].main));
-            Object.assign(e,mod);
-            return e;
-        } catch (e) { console.log(`ERROR while loading extension: \n`,e); return null }
+            if (e[ModuleSettingsSymbol].main) {
+                let mod = require(path.resolve(e[ModulePathSymbol],e[ModuleSettingsSymbol].main));
+                Object.assign(e,mod);
+                return e;
+            }
+        } catch (e) { console.log(`Error while loading extension: \n`,e); return null }
     })
     .filter(e=>e!=null);
 
@@ -64,7 +71,7 @@ let b = {
     filename: 'new buffer',
     filepath: null,
     bb_hash:  hash(''),
-    langid: 'markdown',
+    langid: 'epu2-asm',
 }
 
 { // loads a file if one has been provided
@@ -85,7 +92,6 @@ let b = {
 let b_hash  = () => hash(b.buff);
 
 let alt_buffers = [
-    b,
     {
         _ro :      true,
         _internal: true,
@@ -98,7 +104,8 @@ let alt_buffers = [
         hscroll: 0,
         buff: '',
         bb_hash: 0
-    }
+    },
+    b
 ];
 
 let getlines = ()=>b.buff.split(/\n/g);
@@ -271,11 +278,30 @@ async function input(prompt,x,y,replace,defaultValue,placeHolder='',exitChars=''
 }
 input.cancel = Symbol('CANCEL');
 
+function globMatch() {
+
+}
+
+var rf = null;
+function postLanguageUpdate() {
+    rf = (modules.find(e=>{if (typeof e.render!='function') return false;
+        let contrib = e[ModuleSettingsSymbol].contributes;
+        if (!Array.isArray(contrib)) return false;
+        return contrib.some(c=>c['lang-id']==b.langid);
+    })??{}).render;
+}
+
+function languageUpdate() {
+    let lang = (modules.map(m=>m.contributes).filter(m=>Array.isArray(m)&&m.length).flat().find(m=>globMatch(b.filepath,m.matches)||globMatch(path.basename(b.filepath),m.matches))??{})['lang-id'];
+    b.langid = lang ?? 'plain-text';
+    postLanguageUpdate();
+}
+
 function render() {
     let visibleLines = Array(process.stdout.rows-3).fill('');
     let lines;
     let styles = [];
-    let rf = (modules.find(e=>e[ModuleSettingsSymbol]['lang-id'] == b.langid && typeof e.render == 'function') ?? {}).render;
+    //let rf = (modules.find(e=>e[ModuleSettingsSymbol]['lang-id'] == b.langid && typeof e.render == 'function') ?? {}).render;
     if (rf) ({lines,styles} = rf(b.buff,[...b.cur0],[...b.cur1],b));
     else    lines = getlines();
     for (let i = 0; i < visibleLines.length; i++) {
@@ -301,9 +327,9 @@ function render() {
         `\x1b[?25l` +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[G${theme.background}`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>theme.background+(styles.filter(s=>inrange(li,ci,s.p0,s.p1)).map(s=>theme[s.s]).join(''))+(inrange(li,ci,c0,c1)/*(c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))*/?'\x1b[7m':'')+c+'\x1b[m').join('')}${theme.background}\x1b[K`)).join('\n') +
-        `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
-        `\n\x1b[40m\x1b[K\x1b[31m^C\x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers`+
+        visibleLines.map((l,li)=>`\x1b[G${theme.background}`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>theme.background+(styles.filter(s=>inrange(li,ci,s.p0,s.p1)).map(s=>s.s.map(ss=>theme[ss]).join('')).join(''))+(inrange(li,ci,c0,c1)/*(c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))*/?'\x1b[7m':'')+c+'\x1b[m').join('')}${theme.background}\x1b[K`)).join('\n') +
+        `\n\x1b[40m\x1b[K         \x1b[31m^G\x1b[39m Goto    \x1b[31m^C\x1b[39m Copy\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
+        `\n\x1b[40m\x1b[K\x1b[31m^ \x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers \x1b[31m^X\x1b[39m Cut \x1b[${sout.columns-util.stripVTControlCharacters(b.langid??'\x1b[33m<none>\x1b[39m').length}G${b.langid??'\x1b[33m<none>\x1b[39m'}`+
         `\x1b[${cp.join(';')}H` +
         `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h');
     sout.write(buffer);
@@ -423,120 +449,198 @@ function move_cursor(dc,dr,mod) {
     }
 }
 
+// async function openMenu(pre='') {
+//     let width = sout.columns-10;
+//     let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
+//     sout.write(`\x1b[${org.join(';')}H${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
+//     let res = await input('',org[1]+1,org[0]+1,
+//         /**
+//          * @param {string} s
+//          */
+//         ss => {
+//             let [,r,i,s] = ss.match(/^((?:\d+)?)((?:\s*)?)((?:.+?)?)$/);
+//             let pre = `\x1b[90m`+r+'\x1b[38m'+i;
+//             if (s.startsWith('g')) {
+//                 let m = 0;
+//                 return pre+'\x1b[40m\x1b[35mg\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
+//                     v => 
+//                         (v.match(/^\d+$/) ? 
+//                             m < 2 ?
+//                                 '\x1b[33m':
+//                                 '\x1b[31m':
+//                             v == ':' ? 
+//                                 m++ ==0  ? 
+//                                     '\x1b[90m':
+//                                     '\x1b[31m':
+//                                 '\x1b[31m') +
+//                         v+'\x1b[39m'   
+//                 );
+//             }
+//             if (s.match(/^c(c?)(\$?)(\$?)(.+?)?$/)) {
+//                 return pre+'\x1b[40m\x1b[35mc\x1b[39m' + Object.entries(s.match(/c(?<l>c?)(?<a>\$?)(?<aa>\$?)(?<_>(?:.+)?)/).groups).map(
+//                     m =>
+//                         (
+//                               m[0] == 'l' ?
+//                                 '\x1b[35m'
+//                             : m[0] == 'a' ?
+//                                 '\x1b[36m'
+//                             : m[0] == 'aa' ?
+//                                 '\x1b[36m'
+//                             :
+//                                 '\x1b[31m'
+//                         ) + m[1] + '\x1b[39m'
+                            
+//                 ).join('');
+//             }
+//             if (s.match(/^x(x?)(\$?)(\$?)(.+?)?$/)) {
+//                 return pre+'\x1b[40m\x1b[35mx\x1b[39m' + Object.entries(s.match(/x(?<l>x?)(?<a>\$?)(?<aa>\$?)(?<_>(?:.+)?)/).groups).map(
+//                     m =>
+//                         (
+//                               m[0] == 'l' ?
+//                                 '\x1b[35m'
+//                             : m[0] == 'a' ?
+//                                 '\x1b[36m'
+//                             : m[0] == 'aa' ?
+//                                 '\x1b[36m'
+//                             :
+//                                 '\x1b[31m'
+//                         ) + m[1] + '\x1b[39m'
+                            
+//                 ).join('');
+//             }
+//             if (s.match(/^\/(?:(?:(.*?)(\/))?)(.+)$/)) {
+//                 let [,f,sp,searchTerm] = s.match(/^\/(?:(?:(.*?)(\/))?)(.+)$/); f??=''; sp??=''; searchTerm??='';
+//                 return pre+'\x1b[40m\x1b[35m/\x1b[36m' + f + '\x1b[35m' + sp + '\x1b[32m' + searchTerm + '\x1b[39m';
+//             }
+//             if (s == 'p') return '\x1b[40m\x1b[35mp\x1b[39m';
+//             if (s == 'q') return '\x1b[40m\x1b[35mq\x1b[39m';
+//             return pre+'\x1b[37;40m'+s;
+//         },
+//     pre,'','\x1B\x18');
+//     if (res == input.cancel || typeof res == 'symbol' /*to make VSCode happy :)*/) return;
+//     let [,rep,cmd] = res.match(/^((?:\d+)?)\s*((?:.+?)?)$/); rep = +rep;
+//     for (let i = 0; i < Math.max(1,rep); i++) {
+//         if (cmd.match(/^g(\d+)(?::(\d+))?$/)) {
+//             let [,l,c] = cmd.match(/^g(\d+)(?::(\d+))?$/);
+//             b.cur1 = ccurfn(icurfn([+(c??b.cur1[0]-1)-1,+l-1]));
+//             b.cur0 = [...b.cur1];
+//         }
+//         if (cmd.match(/^c(c?)(\$?)(\$?)$/)) {
+//             let [,l,a,aa] = cmd.match(/^c(c?)(\$?)(\$?)$/);
+//             let c0 = Math.min(icur0(),icur1()),
+//                 c1 = Math.max(icur0(),icur1());
+//             yank_buff().buff = (a ? yank_buff().buff+(!aa?'\n':'') : '') + (l ? getlines()[b.cur1[1]] : b.buff.slice(c0,c1));
+//         }
+//         if (cmd.match(/^x(x?)(\$?)(\$?)$/)) {
+//             let [,l,a,aa] = cmd.match(/^x(x?)(\$?)(\$?)$/);
+//             let c0 = Math.min(icur0(),icur1()),
+//                 c1 = Math.max(icur0(),icur1());
+//             yank_buff().buff = (a ? yank_buff().buff+(!aa?'\n':'') : '') + (l ? getlines()[b.cur1[1]] : b.buff.slice(c0,c1));
+//             if (l) {
+//                 let a0 = icurfn([0,b.cur1[1]]),
+//                     a1 = icurfn([Infinity,b.cur1[1]]);
+//                 if (!b._ro) b.buff = b.buff.slice(0,a0-1) + b.buff.slice(a1);
+//                 b.cur1[1]--;
+//                 b.cur0 = [...b.cur1];
+//             } else {
+//                 if (!b._ro) b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
+//                 b.cur1 = ccurfn(Math.min(c0,c1));
+//                 b.cur0 = [...b.cur1];
+//             }
+//         }
+//         if (cmd.match(/^\/(?:(?:(.*?)\/)?)(.+)$/)) {
+//             let [,f,searchTerm] = cmd.match(/^\/(?:(?:(.*?)\/)?)(.+)$/); f ??= '';
+//             let i1 = icur1();
+//             let f1 = (f.includes('i')?b.buff.toLowerCase():b.buff).slice(i1).search(f.includes('i')?searchTerm.toLowerCase():searchTerm);
+//             if (f1 == 0) i1++;
+//             f1 = (f.includes('i')?b.buff.toLowerCase():b.buff).slice(i1).search(f.includes('i')?searchTerm.toLowerCase():searchTerm);
+//             if (f1 != -1) {
+//                 b.cur1 = ccurfn(i1+f1);
+//                 b.cur0 = ccurfn(i1+f1+searchTerm.length);
+//             }
+//         }
+//         if (cmd == 'p') {
+//             write(yank_buff().buff);
+//         }
+//         if (cmd == 'q') {
+//             quit = true;
+//         }
+//     }
+// }
+
 async function openMenu(pre='') {
     let width = sout.columns-10;
     let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
     sout.write(`\x1b[${org.join(';')}H${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
+
+    let commands = [
+        {
+            fmt : /^(q)$/,
+            ren : () => ['35'],
+            run : () => {
+                quit = true;
+            }
+        },
+        {
+            fmt : /^(:)(?<l>\d+)(?:(:)(?<c>\d+))?$/,
+            ren : () => ['35','33','35','33'],
+            /** @type {(m:RegExpMatchArray)=>void} */
+            run : (m) => {
+                let l = +m.groups.l;
+                let c = m.groups.c ? +m.groups.c : undefined;
+                b.cur1 = ccurfn(icurfn([+(c??b.cur1[0]-1)-1,+l-1]));
+                b.cur0 = [...b.cur1];
+            },
+        },
+        {
+            fmt : /^(b)(?<idx>\d+)?$/,
+            ren : () => ['35','33'],
+            run : async (m) => { 
+                if (m.groups.idx == undefined) {
+                    await bufferMenu();
+                } else {
+                    let avail_buffers = alt_buffers.filter(b=>b);
+                    b = avail_buffers[+m.groups.idx];
+                }
+            }
+        }
+    ];
+
     let res = await input('',org[1]+1,org[0]+1,
         /**
          * @param {string} s
          */
-        ss => {
-            let [,r,i,s] = ss.match(/^((?:\d+)?)((?:\s*)?)((?:.+?)?)$/);
-            let pre = `\x1b[90m`+r+'\x1b[38m'+i;
-            if (s.startsWith('g')) {
-                let m = 0;
-                return pre+'\x1b[40m\x1b[35mg\x1b[39m'+s.slice(1).replace(/(\w+|:|.+?)/g,
-                    v => 
-                        (v.match(/^\d+$/) ? 
-                            m < 2 ?
-                                '\x1b[33m':
-                                '\x1b[31m':
-                            v == ':' ? 
-                                m++ ==0  ? 
-                                    '\x1b[90m':
-                                    '\x1b[31m':
-                                '\x1b[31m') +
-                        v+'\x1b[39m'   
-                );
+        s => {
+            for (let cmd of commands) if (cmd && cmd.fmt instanceof RegExp) {
+                let m = s.match(cmd.fmt);
+                if (!m) continue;
+                try {
+                    let ren = typeof cmd.ren == 'function' ? cmd.ren(m) : [];
+                    return m.slice(1).map(
+                        (v,i) => {
+                            if (v == undefined) return undefined;
+                            if (ren[i] == null) return undefined;
+                            if (ren[i] == undefined) return v;
+                            if (Array.isArray(ren[i])) return `${ren[i].map(rr=>`\x1b[${rr}m`).join('')}${v}\x1b[40;39m`;
+                            return `\x1b[${ren[i]}m${v}\x1b[40;39m`;
+                        }
+                    ).filter(v=>v!=undefined).join('');
+                } catch {}
             }
-            if (s.match(/^c(c?)(\$?)(\$?)(.+?)?$/)) {
-                return pre+'\x1b[40m\x1b[35mc\x1b[39m' + Object.entries(s.match(/c(?<l>c?)(?<a>\$?)(?<aa>\$?)(?<_>(?:.+)?)/).groups).map(
-                    m =>
-                        (
-                              m[0] == 'l' ?
-                                '\x1b[35m'
-                            : m[0] == 'a' ?
-                                '\x1b[36m'
-                            : m[0] == 'aa' ?
-                                '\x1b[36m'
-                            :
-                                '\x1b[31m'
-                        ) + m[1] + '\x1b[39m'
-                            
-                ).join('');
-            }
-            if (s.match(/^x(x?)(\$?)(\$?)(.+?)?$/)) {
-                return pre+'\x1b[40m\x1b[35mx\x1b[39m' + Object.entries(s.match(/x(?<l>x?)(?<a>\$?)(?<aa>\$?)(?<_>(?:.+)?)/).groups).map(
-                    m =>
-                        (
-                              m[0] == 'l' ?
-                                '\x1b[35m'
-                            : m[0] == 'a' ?
-                                '\x1b[36m'
-                            : m[0] == 'aa' ?
-                                '\x1b[36m'
-                            :
-                                '\x1b[31m'
-                        ) + m[1] + '\x1b[39m'
-                            
-                ).join('');
-            }
-            if (s.match(/^\/(?:(?:(.*?)(\/))?)(.+)$/)) {
-                let [,f,sp,searchTerm] = s.match(/^\/(?:(?:(.*?)(\/))?)(.+)$/); f??=''; sp??=''; searchTerm??='';
-                return pre+'\x1b[40m\x1b[35m/\x1b[36m' + f + '\x1b[35m' + sp + '\x1b[32m' + searchTerm + '\x1b[39m';
-            }
-            if (s == 'p') return '\x1b[40m\x1b[35mp\x1b[39m';
-            return pre+'\x1b[37;40m'+s;
+            return s;
         },
     pre,'','\x1B\x18');
+
     if (res == input.cancel || typeof res == 'symbol' /*to make VSCode happy :)*/) return;
-    let [,rep,cmd] = res.match(/^((?:\d+)?)\s*((?:.+?)?)$/); rep = +rep;
-    for (let i = 0; i < Math.max(1,rep); i++) {
-        if (cmd.match(/^g(\d+)(?::(\d+))?$/)) {
-            let [,l,c] = cmd.match(/^g(\d+)(?::(\d+))?$/);
-            b.cur1 = ccurfn(icurfn([+(c??b.cur1[0]-1)-1,+l-1]));
-            b.cur0 = [...b.cur1];
-        }
-        if (cmd.match(/^c(c?)(\$?)(\$?)$/)) {
-            let [,l,a,aa] = cmd.match(/^c(c?)(\$?)(\$?)$/);
-            let c0 = Math.min(icur0(),icur1()),
-                c1 = Math.max(icur0(),icur1());
-            yank_buff().buff = (a ? yank_buff().buff+(!aa?'\n':'') : '') + (l ? getlines()[b.cur1[1]] : b.buff.slice(c0,c1));
-        }
-        if (cmd.match(/^x(x?)(\$?)(\$?)$/)) {
-            let [,l,a,aa] = cmd.match(/^x(x?)(\$?)(\$?)$/);
-            let c0 = Math.min(icur0(),icur1()),
-                c1 = Math.max(icur0(),icur1());
-            yank_buff().buff = (a ? yank_buff().buff+(!aa?'\n':'') : '') + (l ? getlines()[b.cur1[1]] : b.buff.slice(c0,c1));
-            if (l) {
-                let a0 = icurfn([0,b.cur1[1]]),
-                    a1 = icurfn([Infinity,b.cur1[1]]);
-                if (!b._ro) b.buff = b.buff.slice(0,a0-1) + b.buff.slice(a1);
-                b.cur1[1]--;
-                b.cur0 = [...b.cur1];
-            } else {
-                if (!b._ro) b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
-                b.cur1 = ccurfn(Math.min(c0,c1));
-                b.cur0 = [...b.cur1];
-            }
-        }
-        if (cmd.match(/^\/(?:(?:(.*?)\/)?)(.+)$/)) {
-            let [,f,searchTerm] = cmd.match(/^\/(?:(?:(.*?)\/)?)(.+)$/); f ??= '';
-            let i1 = icur1();
-            let f1 = (f.includes('i')?b.buff.toLowerCase():b.buff).slice(i1).search(f.includes('i')?searchTerm.toLowerCase():searchTerm);
-            if (f1 == 0) i1++;
-            f1 = (f.includes('i')?b.buff.toLowerCase():b.buff).slice(i1).search(f.includes('i')?searchTerm.toLowerCase():searchTerm);
-            if (f1 != -1) {
-                b.cur1 = ccurfn(i1+f1);
-                b.cur0 = ccurfn(i1+f1+searchTerm.length);
-            }
-        }
-        if (cmd == 'p') {
-            write(yank_buff().buff);
-        }
+    
+    for (let cmd of commands) if (cmd && cmd.fmt instanceof RegExp) {
+        let m = res.match(cmd.fmt);
+        if (!m) continue;
+        try { await cmd.run(m,res); } catch { };
+        break;
     }
 }
+    
 
 async function bufferMenu() {
     let avail_buffers = alt_buffers.filter(b=>b);
@@ -553,7 +657,7 @@ async function bufferMenu() {
             `\x1b[H\x1b[K\x1b[40m` +
             `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
             l.map((ll,i)=>`\x1b[K${i==cur?'\x1b[7m':''}${ll}\x1b[27m`).join('\n') +
-            `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Close`+ 
+            `\n\x1b[40m\x1b[K\x1b[31m^ \x1b[39m Close`+ 
             `\n\x1b[40m\x1b[K`
         ;
         sout.write(buffer);
@@ -598,6 +702,15 @@ async function saveFile() {
     b.bb_hash = b_hash();
 }
 
+function yankWrite(str) {
+    yank_buff().buff = str;
+    sout.write(`\x1b]52;;${btoa(yank_buff().buff)}\x07`);
+}
+
+function yankAppend(str) {
+    yankWrite(yank_buff().buff+str);
+}
+
 let processExitHandler = () => {   
     sout.write('\x1b[?1049l\x1b[?25h\x1B[0 q'); // leaves alternative screen buffer
     process.exit();
@@ -620,52 +733,80 @@ sout.on('resize',render);
 
 
     sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
-    sout.write('\x1b]0;Feathr\7'); // window title
+    sout.write('\x1b]0;Feathr\x07'); // window title
+
+    languageUpdate();
+
+    let inbuff = '';
 
     try {
-        while (true) {
+        while (!quit) {
             render();
-            let c = await getch();
-            //console.log(util.inspect(c));
-            if (c == '\r') {
-                let i = Array.from(getlines()[ccurfn(icur1())[1]].match(/^\s*/))[0].length;
-                write('\n'+' '.repeat(i));
-            }
-            else if (c == '\t') {
-                write(' '.repeat(4));
-            }
-            else if (c == '\x1b') {
-                b.cur0 = [...b.cur1];
-            }
-            else if (c == '\b' || c == '\x7F') backsp();
-            else if (c == '\x1b[A') move_cursor( 0,-1);
-            else if (c == '\x1b[B') move_cursor( 0, 1);
-            else if (c == '\x1b[C') move_cursor( 1, 0);
-            else if (c == '\x1b[D') move_cursor(-1, 0);
-            else if (c == '\x1b[1;2A') move_cursor( 0,-1,1);
-            else if (c == '\x1b[1;2B') move_cursor( 0, 1,1);
-            else if (c == '\x1b[1;2C') move_cursor( 1, 0,1);
-            else if (c == '\x1b[1;2D') move_cursor(-1, 0,1); 
-            else if (c == '\x1b[3~') del();
-            else if (c == '\x1b[1~' || c == '\x1b[H') move_cursor(-Infinity,0);
-            else if (c == '\x1b[4~' || c == '\x1b[F') move_cursor( Infinity,0);
-            else if (c == '\x1b[1;2~') move_cursor(-Infinity,0,1);
-            else if (c == '\x1b[4;2~') move_cursor( Infinity,0,1);
-            else if (c.charCodeAt() < 0x1A) { // Ctrl+[key]
-                let k = String.fromCharCode(c.charCodeAt()+64);
-                if (k == 'X') break;
-                if (k == 'A') {
-                    b.cur1 = ccurfn(Infinity);
-                    b.cur0 = [0,0];
+            //inbuff += Array.from(await getch()).reverse().join('');
+            inbuff = await getch() + inbuff;
+            //write(util.inspect(inbuff));
+            while (inbuff.length) {
+                let c = inbuff.slice(0,1);
+                //console.log(util.inspect(c));
+                let i = 1;
+                let matches = cc => {
+                    if (inbuff.slice(0,cc.length) != cc) return false;
+                    i = cc.length;
+                    return true;
+                };
+                if (false) {}
+                else if (matches('\x1b[A'))    move_cursor(  0, -1    );
+                else if (matches('\x1b[B'))    move_cursor(  0,  1    );
+                else if (matches('\x1b[C'))    move_cursor(  1,  0    );
+                else if (matches('\x1b[D'))    move_cursor( -1,  0    );
+                else if (matches('\x1b[1;2A')) move_cursor(  0, -1,  1);
+                else if (matches('\x1b[1;2B')) move_cursor(  0,  1,  1);
+                else if (matches('\x1b[1;2C')) move_cursor(  1,  0,  1);
+                else if (matches('\x1b[1;2D')) move_cursor( -1,  0,  1); 
+                else if (matches('\x1b[3~')) del();
+                else if (matches('\x1b[1~') || matches('\x1b[H')) move_cursor(-Infinity,0);
+                else if (matches('\x1b[4~') || matches('\x1b[F')) move_cursor( Infinity,0);
+                else if (matches('\x1b[1;2~')) move_cursor(-Infinity,0,1);
+                else if (matches('\x1b[4;2~')) move_cursor( Infinity,0,1);
+                else if (c == '\r') {
+                    let i = Array.from(getlines()[ccurfn(icur1())[1]].match(/^\s*/))[0].length;
+                    write('\n'+' '.repeat(i));
                 }
-                if (k == 'C') await openMenu();
-                if (k == 'G') await openMenu('g');
-                if (k == 'B') await bufferMenu();
-                if (k == 'S') await saveFile();
-            }
-            else {
-                let wv = util.toUSVString(util.stripVTControlCharacters(c).replace(/[\x1B\0]/g,'').replace(/\r\n/g,'\n'));
-                if (wv.length) write(wv);
+                else if (c == '\t') {
+                    write(' '.repeat(4));
+                }
+                else if (c == '\b' || c == '\x7F') backsp();
+                else if (c == '\x1b') await openMenu();
+                else if (c.charCodeAt() < 0x1A) { // Ctrl+[key]
+                    let k = String.fromCharCode(c.charCodeAt()+64);
+
+                    if (k == 'X' || k == 'C') { // copy / cut
+                        let c0 = Math.min(icur0(),icur1()),
+                            c1 = Math.max(icur0(),icur1());
+                        let c = b.buff.slice(c0,c1);
+                        if (c0 == c1) c = b.buff.slice(icurfn([0,b.cur0[1]]),icurfn([getlines()[b.cur0[1]].length,b.cur0[1]]));
+                        yankWrite(c);
+                        if (k == 'X') {
+                            if (!b._ro) b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
+                            b.cur1 = ccurfn(Math.min(c0,c1));
+                            b.cur0 = [...b.cur1];
+                        }
+                    }
+
+                    if (k == 'A') { // select all
+                        b.cur1 = ccurfn(Infinity);
+                        b.cur0 = [0,0];
+                    }
+                    
+                    if (k == 'G') await openMenu(':');
+                    if (k == 'B') await bufferMenu();
+                    if (k == 'S') await saveFile();
+                }
+                else {
+                    let wv = util.toUSVString(util.stripVTControlCharacters(c.replace(/[\x1B\0]/g,'').replace(/\r\n/g,'\n')));
+                    if (wv.length) write(wv);
+                }
+                inbuff = inbuff.slice(i);
             }
         }
     } catch (e) {
