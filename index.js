@@ -283,6 +283,8 @@ input.cancel = Symbol('CANCEL');
  * @param {RegExp} pattern
  */
 function globMatch(p, pattern) {
+    p ??= '';
+    pattern ??= '';
     let parts = pattern.split(/\*/g);
     let li = 0;
     for (let pt of parts) {
