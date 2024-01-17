@@ -3,6 +3,47 @@ const util = require('node:util');
 const crypto = require('node:crypto');
 const path = require('node:path');
 
+const theme = {
+    function: '\x1b[38;2;220;220;170m',
+    name: '\x1b[38;2;156;220;254m',
+    control_keyword: '\x1b[38;2;197;134;192m',
+    keyword: '\x1b[38;2;86;156;214m',
+    string: '\x1b[38;2;206;145;120m',
+    class: '\x1b[38;2;78;201;176m',
+    number: '\x1b[38;2;181;206;168m',
+    operator: '\x1b[38;2;51;51;51m',
+    comment: '\x1b[38;2;106;153;85m',
+    highlight: '\x1b[44m',
+    background: '\x1b[48;2;31;31;31m'
+}
+
+function safeJSON(str) {
+    try {
+        return JSON.parse(str);
+    } catch {
+        return safeJSON.Error;
+    }
+}
+safeJSON.Error = Symbol('JSON parsing error');
+
+const ModuleSettingsSymbol = Symbol('Module Settings');
+const ModulePathSymbol = Symbol('Module Path');
+
+const modules = fs
+    .readdirSync(path.resolve(__dirname,'extensions'))
+    .map(p=>path.resolve(__dirname,'extensions',p))
+    .filter(p=>fs.existsSync(path.join(p,'extension.json')))
+    .map(p=>({[ModulePathSymbol]:p,[ModuleSettingsSymbol]:safeJSON(fs.readFileSync(path.resolve(p,'extension.json')))}))
+    .filter(e=>e[ModuleSettingsSymbol] != safeJSON.Error)
+    .map(e=>{
+        try {
+            let mod = require(path.resolve(e[ModulePathSymbol],e[ModuleSettingsSymbol].main));
+            Object.assign(e,mod);
+            return e;
+        } catch { return null }
+    })
+    .filter(e=>e!=null);
+
 const hash =   d   => crypto.createHash('sha1').update(d).digest('hex');
 const mod  = (a,b) => ((a%b)+b)%b;
 
@@ -18,7 +59,8 @@ let b = {
     buff: '',
     filename: 'new buffer',
     filepath: null,
-    bb_hash:  hash('')
+    bb_hash:  hash(''),
+    langid: 'nugget-script',
 }
 
 { // loads a file if one has been provided
@@ -227,7 +269,11 @@ input.cancel = Symbol('CANCEL');
 
 function render() {
     let visibleLines = Array(process.stdout.rows-3).fill('');
-    let lines = getlines();
+    let lines;
+    let styles = [];
+    let rf = (modules.find(e=>e[ModuleSettingsSymbol]['lang-id'] == b.langid && typeof e.render == 'function') ?? {}).render;
+    if (rf) ({lines,styles} = rf(b.buff,[...b.cur0],[...b.cur1],b));
+    else    lines = getlines();
     for (let i = 0; i < visibleLines.length; i++) {
         let rl = Array.from(lines[i+b.vscroll] ?? ['\x1b[90m~\x1b[39m']);
         visibleLines[i] = rl.slice(b.hscroll,b.hscroll+sout.columns-5);
@@ -237,24 +283,25 @@ function render() {
     let modified = b._ro ? false : (b_hash() != b.bb_hash);
     let middle_txt = `${b.filename}${modified?'\x1b[33m*\x1b[39m':''} ${b._ro?'\x1b[33m(read only)\x1b[39m':''}`;
     let curr = ccurfn(ri1);
-    let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}]`;
+    let cupmsg = `[${[curr[1]+1,curr[0]+1].join(':')}]`;
     let i0 = Math.min(ri0,ri1);
     let i1 = Math.max(ri0,ri1);
     let cp = [
         curr[1]+2-b.vscroll,
         curr[0]+6-b.hscroll
     ];
+    let inrange = (li,ci,rs,re) => (rs[1]<=li+b.vscroll&&re[1]>=li+b.vscroll&&(re[1]!=li+b.vscroll||re[0]>ci+b.hscroll)&&(rs[1]!=li+b.vscroll||rs[0]<=ci+b.hscroll));
     let c0 = i0 == ri0 ? b.cur0 : b.cur1,
         c1 = i1 == ri1 ? b.cur1 : b.cur0;
     let buffer = 
-        `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h') +
+        `\x1b[?25l` +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[K`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>((c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))?'\x1b[7m':'')+c+'\x1b[27m').join('')}`)).join('\n') +
+        visibleLines.map((l,li)=>`\x1b[G${theme.background}`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>theme.background+(styles.length?(theme[(styles.find(s=>inrange(li,ci,s.p0,s.p1))??{}).s]??''):'')+(inrange(li,ci,c0,c1)/*(c0[1]<=li+b.vscroll&&c1[1]>=li+b.vscroll&&(c1[1]!=li+b.vscroll||c1[0]>ci+b.hscroll)&&(c0[1]!=li+b.vscroll||c0[0]<=ci+b.hscroll))*/?'\x1b[7m':'')+c+'\x1b[m').join('')}${theme.background}\x1b[K`)).join('\n') +
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
         `\n\x1b[40m\x1b[K\x1b[31m^C\x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers`+
-        `\x1b[${cp.join(';')}H`
-    ;
+        `\x1b[${cp.join(';')}H` +
+        `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h');
     sout.write(buffer);
 }
 
@@ -528,8 +575,8 @@ async function bufferMenu() {
 
 async function saveFile() {
     if (b.filepath) {
-        try { fs.accessSync(f,fs.constants.W_OK); b._ro = false }
-        catch { b._ro = true }
+        try { fs.accessSync(b.filepath,fs.constants.W_OK); delete b['_ro']; }
+        catch (e) { b._ro = true }
     }
     if (b._ro) return;
     if (!b.filepath) {

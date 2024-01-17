@@ -1,0 +1,15 @@
+fn string t() {
+    var x;
+    x = "Hello, world !";
+    printf(x);
+    loop {
+        var y;
+        break;
+    }
+    printf(y);
+    return x;
+}
+
+fn void main() {
+    t();
+}
