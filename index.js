@@ -431,14 +431,15 @@ async function openMenu(pre='') {
                             
                 ).join('');
             }
-            if (s.match(/^\/(.+?)$/)) {
-                return pre+'\x1b[40m\x1b[35m/\x1b[32m' + s.slice(1) + '\x1b[39m'
+            if (s.match(/^\/(?:(?:(.*?)(\/))?)(.+)$/)) {
+                let [,f,sp,searchTerm] = s.match(/^\/(?:(?:(.*?)(\/))?)(.+)$/); f??=''; sp??=''; searchTerm??='';
+                return pre+'\x1b[40m\x1b[35m/\x1b[36m' + f + '\x1b[35m' + sp + '\x1b[32m' + searchTerm + '\x1b[39m';
             }
             if (s == 'p') return '\x1b[40m\x1b[35mp\x1b[39m';
             return pre+'\x1b[37;40m'+s;
         },
     pre,'','\x1B\x18');
-    if (res == input.cancel) return;
+    if (res == input.cancel || typeof res == 'symbol' /*to make VSCode happy :)*/) return;
     let [,rep,cmd] = res.match(/^((?:\d+)?)\s*((?:.+?)?)$/); rep = +rep;
     for (let i = 0; i < Math.max(1,rep); i++) {
         if (cmd.match(/^g(\d+)(?::(\d+))?$/)) {
@@ -469,14 +470,15 @@ async function openMenu(pre='') {
                 b.cur0 = [...b.cur1];
             }
         }
-        if (cmd.match(/^\/(.+)$/)) {
+        if (cmd.match(/^\/(?:(?:(.*?)\/)?)(.+)$/)) {
+            let [,f,searchTerm] = cmd.match(/^\/(?:(?:(.*?)\/)?)(.+)$/); f ??= '';
             let i1 = icur1();
-            let f1 = b.buff.slice(i1).search(cmd.slice(1));
+            let f1 = (f.includes('i')?b.buff.toLowerCase():b.buff).slice(i1).search(f.includes('i')?searchTerm.toLowerCase():searchTerm);
             if (f1 == 0) i1++;
-            f1 = b.buff.slice(i1).search(cmd.slice(1));
+            f1 = (f.includes('i')?b.buff.toLowerCase():b.buff).slice(i1).search(f.includes('i')?searchTerm.toLowerCase():searchTerm);
             if (f1 != -1) {
                 b.cur1 = ccurfn(i1+f1);
-                b.cur0 = ccurfn(i1+f1+cmd.length-1);
+                b.cur0 = ccurfn(i1+f1+searchTerm.length);
             }
         }
         if (cmd == 'p') {
@@ -534,7 +536,7 @@ async function saveFile() {
         let width = sout.columns-10;
         let org = [Math.floor(sout.rows/2-3/2)+1,Math.floor(sout.columns/2-width/2)]; // [r,c] so it's easier for VT/ANSI escape sequences
         sout.write(`\x1b[${org.join(';')}H${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}\x1b[B\x1b[${org[1]}G${' '.repeat(width)}`);
-        let fp = await input('',org[1]+1,org[0]+1);
+        let fp = await input('',org[1]+1,org[0]+1,undefined,undefined,undefined,'\x1B\x18');
         if (fp == input.cancel) return;
         if (fs.existsSync(path.dirname(fp))) {
             b.filepath = path.resolve(fp);
