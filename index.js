@@ -2,46 +2,49 @@ const fs = require('node:fs');
 const util = require('node:util');
 const crypto = require('node:crypto');
 
-const hash = d => crypto.createHash('sha1').update(d).digest('hex');
+const hash =   d   => crypto.createHash('sha1').update(d).digest('hex');
+const mod  = (a,b) => ((a%b)+b)%b;
 
 const sout = process.stdout;
 const sin  = process.stdin;
 
-let buff = '';
-let bf   = [];
-let cb   = 0;
-let alt_buffers = [
-    {
-        filename: noFile,
-        cur0: [0,0],
-        cur1: [0,0],
-        vscroll: 0,
-        hscroll: 0,
-        buff: ''
-    },
-    {
-        _ro : true,
-        filename: 'yank',
-        cur0: [0,0],
-        cur1: [0,0],
-        vscroll: 0,
-        hscroll: 0,
-        buff: ''
-    }
-]
-let getlines = ()=>buff.split(/\r?\n/g);
+let cb = 0;
+let b = {
+    cur0: [0,0],
+    cur1: [0,0],
+    vscroll: 0,
+    hscroll: 0,
+    buff: '',
+    filename: 'new buffer',
+    filepath: null,
+}
 
-let b_hash  = () => hash(buff);
+let b_hash  = () => hash(b.buff);
 let bb_hash = b_hash();
 
-let vscroll = 0,
-    hscroll = 0;
+let alt_buffers = [
+    b,
+    {
+        _ro :      true,
+        _internal: true,
+        
+        filename: 'yank',
+        filepath: null,
+        cur0: [0,0],
+        cur1: [0,0],
+        vscroll: 0,
+        hscroll: 0,
+        buff: '',
+        bb_hash: 0
+    }
+];
 
-let cur0 = [0,0],
-    cur1 = [0,0];
+let getlines = ()=>b.buff.split(/\r?\n/g);
+let current_buffer = ()=>alt_buffers[cb];
+let yank_buff = ()=>alt_buffers.find(b=>b._internal&&b.filename=='yank');
 
 let ccurfn = (i) => {
-    let sb = buff.slice(0,Math.max(0,i));
+    let sb = b.buff.slice(0,Math.max(0,i));
     let pl = sb.split('\n').slice(0,-1).reduce((acc,v)=>acc+v.length+1,0);
     return [Math.min(Math.max(0,i-pl),sb.split('\n').at(-1).length),(sb.match(/\n/g)??[]).length];
 }
@@ -51,12 +54,8 @@ let icurfn = (cur) => {
     let cl = l[Math.max(0,Math.min(l.length-1,cur[1]))];
     return Math.max(Math.min(cl.length,cur[0]),0) + pl.reduce((acc,v)=>v.length+1+acc,0);
 }
-let icur0 = () => icurfn(cur0);
-let icur1 = () => icurfn(cur1);
-
-const noFile = Symbol('<new file>');
-/** @type {string|Symbol} */
-let filename = noFile;
+let icur0 = () => icurfn(b.cur0);
+let icur1 = () => icurfn(b.cur1);
 
 /**
  * Returns the current position of the cursor
@@ -214,26 +213,26 @@ function render() {
     let visibleLines = Array(process.stdout.rows-3).fill('');
     let lines = getlines();
     for (let i = 0; i < visibleLines.length; i++) {
-        let rl = Array.from(lines[i+vscroll] ?? ['\x1b[90m~\x1b[39m']);
-        visibleLines[i] = rl.slice(hscroll,hscroll+sout.columns-5);
+        let rl = Array.from(lines[i+b.vscroll] ?? ['\x1b[90m~\x1b[39m']);
+        visibleLines[i] = rl.slice(b.hscroll,b.hscroll+sout.columns-5);
     }
-    let modified = b_hash() != bb_hash;
-    let middle_txt = `${filename==noFile?`\x1b[36m${filename.description}\x1b[39m`:filename}${modified?'\x1b[33m*\x1b[39m':''}`;
+    let modified = b._ro ? false : (b_hash() != bb_hash);
+    let middle_txt = `${b.filename}${modified?'\x1b[33m*\x1b[39m':''} ${b._ro?'\x1b[33m(read only)\x1b[39m':''}`;
     let curr = ccurfn(icur1());
     let cupmsg = `[${[curr[0]+1,curr[1]+1].join(':')}]`;
     let i0 = Math.min(icur0(),icur1());
     let i1 = Math.max(icur0(),icur1());
     let cp = [
-        curr[1]+2-vscroll,
-        curr[0]+6-hscroll
+        curr[1]+2-b.vscroll,
+        curr[0]+6-b.hscroll
     ];
     let buffer = 
         `\x1b[?25` + ((cp[0] < 2 || cp[0] > process.stdout.rows-2 || cp[1] < 0 || cp[1] > process.stdout.columns+1)?'l':'h') +
         `\x1b[H\x1b[K\x1b[40m` +
         `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-        visibleLines.map((l,li)=>`\x1b[K`+(li+vscroll==curr[1]?'\x1b[7m':'')+(li+vscroll<0?'':`${(li+vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
+        visibleLines.map((l,li)=>`\x1b[K`+(li+b.vscroll==curr[1]?'\x1b[7m':'')+(li+b.vscroll<0?'':`${(li+b.vscroll+1).toString().padStart(4,' ')}\x1b[27m ${l.map((c,ci)=>(icurfn([ci,li])>=i0?'\x1b[7m':'')+(icurfn([ci,li])>=i1?'\x1b[27m':'')+c+'\x1b[27m').join('')}`)).join('\n') + 
         `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Exit  \x1b[31m^G\x1b[39m Goto\x1b[${sout.columns-cupmsg.length}G${cupmsg}`+ 
-        `\n\x1b[40m\x1b[K\x1b[31m^\x1b[39m  Menu  \x1b[31m^B\x1b[39m Buffers`+
+        `\n\x1b[40m\x1b[K\x1b[31m^C\x1b[39m Menu  \x1b[31m^B\x1b[39m Buffers`+
         `\x1b[${cp.join(';')}H`
     ;
     sout.write(buffer);
@@ -241,19 +240,19 @@ function render() {
 
 function adjust_view() {
     // Y adjust
-    while (cur1[1] >= Math.min(process.stdout.rows+vscroll-2)-1) {
-        vscroll++;
+    while (b.cur1[1] >= Math.min(process.stdout.rows+b.vscroll-2)-1) {
+        b.vscroll++;
     }
-    while (cur1[1] < vscroll) {
-        vscroll--;
+    while (b.cur1[1] < b.vscroll) {
+        b.vscroll--;
     }
 
     // X adjust
-    while (cur1[0] >= Math.min(process.stdout.columns+hscroll-3)-1) {
-        hscroll++;
+    while (b.cur1[0] >= Math.min(process.stdout.columns+b.hscroll-3)-1) {
+        b.hscroll++;
     }
-    while (cur1[0] < hscroll) {
-        hscroll--;
+    while (b.cur1[0] < b.hscroll) {
+        b.hscroll--;
     }
 }
 
@@ -263,80 +262,91 @@ function adjust_view() {
  * @param {bool}   s whether the cursor should stay in place
  */
 function write(v,s=false) {
-    if (!bf.includes('_ro'));
+    if (b._ro) return;
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
-    buff = buff.slice(0,c0) + v + buff.slice(c1);
+        b.buff = b.buff.slice(0,c0) + v + b.buff.slice(c1);
     if (!s) {
-        cur1 = ccurfn(c0+v.length);
-        cur0 = [...cur1];
+        b.cur1 = ccurfn(c0+v.length);
+        b.cur0 = [...b.cur1];
     }
     adjust_view();
 }
 
 function backsp() {
-    if (!bf.includes('_ro'));
+    if (b._ro) return;
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
     if (c0 != c1) {
-        buff = buff.slice(0,c0) + buff.slice(c1);
-        cur1 = ccurfn(Math.min(c0,c1));
-        cur0 = [...cur1];
+        b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
+        b.cur1 = ccurfn(Math.min(c0,c1));
+        b.cur0 = [...b.cur1];
     }
     else {
-        buff = buff.slice(0,Math.max(0,c0-1)) + buff.slice(c1);
-        cur1 = ccurfn(c0-1);
-        cur0 = [...cur1];
+        b.buff = b.buff.slice(0,Math.max(0,c0-1)) + b.buff.slice(c1);
+        b.cur1 = ccurfn(c0-1);
+        b.cur0 = [...b.cur1];
     }
     adjust_view();
 }
 
 function del() {
-    if (!bf.includes('_ro'));
+    if (b._ro) return;
     let c0 = Math.min(icur0(),icur1()),
         c1 = Math.max(icur0(),icur1());
     if (c0 != c1) {
-        buff = buff.slice(0,c0) + buff.slice(c1);
-        cur1 = ccurfn(Math.min(c0,c1));
-        cur0 = [...cur1];
+        b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
+        b.cur1 = ccurfn(Math.min(c0,c1));
+        b.cur0 = [...b.cur1];
     }
     else {
-        buff = buff.slice(0,c1) + buff.slice(Math.max(0,c1+1));
+        b.buff = b.buff.slice(0,c1) + b.buff.slice(Math.max(0,c1+1));
     }
     adjust_view();
 }
 
 function move_cursor(dc,dr,mod) {
     let indent = Array.from(getlines()[ccurfn(icur1())[1]].match(/^\s*/))[0].length;
+    let c0 = Math.min(icur0(),icur1()),
+        c1 = Math.max(icur0(),icur1());
     if (mod == 1) { // shift
         if (dc) {
             if (dc == Infinity)
-                cur1[0] = getlines()[cur1[1]].length;
+                b.cur1[0] = getlines()[b.cur1[1]].length;
             else if (dc == -Infinity)
-                cur1[0] = cur1[0] == indent ? 0 : indent;
+                b.cur1[0] = b.cur1[0] == indent ? 0 : indent;
             else
-                cur1 = ccurfn(icur1()+dc);
+                b.cur1 = ccurfn(icur1()+dc);
         }
         if (dr) {
-            cur1 = [cur1[0],Math.min(getlines().length,Math.max(0,cur1[1]+dr))];
+            b.cur1 = [b.cur1[0],Math.min(getlines().length,Math.max(0,b.cur1[1]+dr))];
         }
         adjust_view();
     } else if (mod == 2) { // ctrl
-        vscroll += dr;
-        hscroll += dc;
+        b.vscroll += dr;
+        b.hscroll += dc;
     } else {
         if (dc) {
-            if (dc == Infinity)
-                cur1[0] = getlines()[cur1[1]].length;
-            else if (dc == -Infinity)
-                cur1[0] = cur1[0] == indent ? 0 : indent;
-            else
-                cur1 = ccurfn(icur1()+dc);
-            cur0 = [...cur1];
+            if (c0 != c1) {
+                if (dc < 0) {
+                    b.cur1 = ccurfn(c0);
+                } else {
+                    b.cur1 = ccurfn(c1);
+                }
+                b.cur0 = [...b.cur1];
+            } else {
+                if (dc == Infinity)
+                    b.cur1[0] = getlines()[b.cur1[1]].length;
+                else if (dc == -Infinity)
+                    b.cur1[0] = b.cur1[0] == indent ? 0 : indent;
+                else
+                    b.cur1 = ccurfn(icur1()+dc);
+                b.cur0 = [...b.cur1];
+            }
         }
         if (dr) {
-            cur1 = [cur1[0],Math.min(getlines().length,Math.max(0,cur1[1]+dr))];
-            cur0 = [...cur1];
+            b.cur1 = [b.cur1[0],Math.min(getlines().length,Math.max(0,b.cur1[1]+dr))];
+            b.cur0 = [...b.cur1];
         }
         adjust_view();
     }
@@ -367,39 +377,110 @@ async function openMenu(pre='') {
                         v+'\x1b[39m'   
                 );
             }
+            if (s.match(/^c(c?)(\$?)(.+?)?$/)) {
+                return '\x1b[40m\x1b[35mc\x1b[39m' + Object.entries(s.match(/c(?<l>c?)(?<a>\$?)(?<_>(?:.+)?)/).groups).map(
+                    m =>
+                        (
+                              m[0] == 'l' ?
+                                '\x1b[35m'
+                            : m[0] == 'a' ?
+                                '\x1b[36m'
+                            :
+                                '\x1b[31m'
+                        ) + m[1] + '\x1b[39m'
+                            
+                ).join('');
+            }
+            if (s.match(/^x(x?)(\$?)(.+?)?$/)) {
+                return '\x1b[40m\x1b[35mx\x1b[39m' + Object.entries(s.match(/x(?<l>x?)(?<a>\$?)(?<_>(?:.+)?)/).groups).map(
+                    m =>
+                        (
+                              m[0] == 'l' ?
+                                '\x1b[35m'
+                            : m[0] == 'a' ?
+                                '\x1b[36m'
+                            :
+                                '\x1b[31m'
+                        ) + m[1] + '\x1b[39m'
+                            
+                ).join('');
+            }
+            if (s == 'p') return '\x1b[40m\x1b[35mp\x1b[39m';
             return '\x1b[37;40m'+s;
         },
     pre,'','\x1B\x18 ');
     if (cmd == input.cancel) return;
     if (cmd.match(/^g(\d+)(?::(\d+))?$/)) {
         let [,l,c] = cmd.match(/^g(\d+)(?::(\d+))?$/);
-        cur1 = ccurfn(icurfn([+(c??cur1[0]-1)-1,+l-1]));
-        cur0 = [...cur1];
+        b.cur1 = ccurfn(icurfn([+(c??b.cur1[0]-1)-1,+l-1]));
+        b.cur0 = [...b.cur1];
+    }
+    if (cmd.match(/^c(c?)(\$?)$/)) {
+        let [,l,a] = cmd.match(/^c(c?)(\$?)$/);
+        let c0 = Math.min(icur0(),icur1()),
+            c1 = Math.max(icur0(),icur1());
+        yank_buff().buff = (a ? yank_buff().buff+'\n' : '') + (l ? getlines()[b.cur1[1]] : b.buff.slice(c0,c1));
+    }
+    if (cmd.match(/^x(x?)(\$?)$/)) {
+        let [,l,a] = cmd.match(/^x(x?)(\$?)$/);
+        let c0 = Math.min(icur0(),icur1()),
+            c1 = Math.max(icur0(),icur1());
+        yank_buff().buff = (a ? yank_buff().buff+'\n' : '') + (l ? getlines()[b.cur1[1]] : b.buff.slice(c0,c1));
+        if (l) {
+            let a0 = icurfn([0,b.cur1[1]]),
+                a1 = icurfn([Infinity,b.cur1[1]]);
+            if (!b._ro) b.buff = b.buff.slice(0,a0) + b.buff.slice(a1);
+        } else {
+            if (!b._ro) b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
+            b.cur1 = ccurfn(Math.min(c0,c1));
+            b.cur0 = [...b.cur1];
+        }
+    }
+    if (cmd == 'p') {
+        write(yank_buff().buff);
+    }
+    if (cmd == 'e') {
+        yank_buff().buff += 'E';
     }
 }
 
 async function bufferMenu() {
-    let cur = 0;
+    let avail_buffers = alt_buffers.filter(b=>b);
+    let cur = avail_buffers.indexOf(b);
     function render() {
-        let l = Array(process.stdout.rows-3).fill('');
+        let l = Array(process.stdout.rows-3).fill().map(
+            (_,i) => {
+                let b = avail_buffers[i];
+                return b ? `${b._internal?'\x1b[33m':''}${b.filename}\x1b[39m` : '';
+            }
+        );
         let middle_txt = `Buffer Selection`;
         let buffer = 
             `\x1b[H\x1b[K\x1b[40m` +
             `[${' '.repeat(Math.floor(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2)-1)}${middle_txt}\x1b[39;40m${' '.repeat(Math.ceil(sout.columns/2-util.stripVTControlCharacters(middle_txt).length/2-1))}]\x1b[m\n` +
-            l.map(ll=>`\x1b[K${ll}`).join('\n') +
-            `\n\x1b[40m\x1b[K\x1b[31m^ \x1b[39m Close`+ 
+            l.map((ll,i)=>`\x1b[K${i==cur?'\x1b[7m':''}${ll}\x1b[27m`).join('\n') +
+            `\n\x1b[40m\x1b[K\x1b[31m^X\x1b[39m Close`+ 
             `\n\x1b[40m\x1b[K`
         ;
         sout.write(buffer);
     }
+    sout.on('resize',render);
     while (true) {
         render();
         let c = await getch();
         if (c == '\r') {
-            
+            b = avail_buffers[cur];
+            break;
         }
-        if (c == '\x1b') return;
+        if (c == '\x1b[A') {
+            cur = mod(cur-1,avail_buffers.length);
+        }
+        if (c == '\x1b[B') {
+            cur = mod(cur+1,avail_buffers.length);
+        }
+        if (c == '\x1b' || c == '\x02' || c == '\x18') break;
     }
+    sout.off('resize',render);
 }
 
 let processExitHandler = () => {   
@@ -438,8 +519,10 @@ sout.on('resize',render);
             else if (c == '\t') {
                 write(' '.repeat(4));
             }
+            else if (c == '\x1b') {
+                b.cur0 = [...b.cur1];
+            }
             else if (c == '\b' || c == '\x7F') backsp();
-            else if (c == '\x1b') await openMenu();
             else if (c == '\x1b[A') move_cursor( 0,-1);
             else if (c == '\x1b[B') move_cursor( 0, 1);
             else if (c == '\x1b[C') move_cursor( 1, 0);
@@ -456,11 +539,16 @@ sout.on('resize',render);
             else if (c.charCodeAt() < 0x1A) { // Ctrl+[key]
                 let k = String.fromCharCode(c.charCodeAt()+64);
                 if (k == 'X') break;
+                if (k == 'A') {
+                    b.cur1 = ccurfn(Infinity);
+                    b.cur0 = [0,0];
+                }
+                if (k == 'C') await openMenu();
                 if (k == 'G') await openMenu('g');
                 if (k == 'B') await bufferMenu();
             }
             else {
-                let wv = util.stripVTControlCharacters(c);
+                let wv = util.stripVTControlCharacters(c).replace(/\x1B/g,'');
                 if (wv.length) write(wv);
             }
         }
