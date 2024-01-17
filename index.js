@@ -462,6 +462,7 @@ async function openMenu(pre='') {
                     a1 = icurfn([Infinity,b.cur1[1]]);
                 if (!b._ro) b.buff = b.buff.slice(0,a0-1) + b.buff.slice(a1);
                 b.cur1[1]--;
+                b.cur0 = [...b.cur1];
             } else {
                 if (!b._ro) b.buff = b.buff.slice(0,c0) + b.buff.slice(c1);
                 b.cur1 = ccurfn(Math.min(c0,c1));
