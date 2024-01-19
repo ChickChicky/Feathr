@@ -32,10 +32,15 @@ class BufferWindow extends Window {
         this.sy = 0;
         this.cx = 0;
         this.cy = 0;
+        /** @type {string} */
         this.buff = buff||'';
+        this.cr = (this.buff.match(/\r/g)||[]).length*1.5 >= (this.buff.match(/\n/g)||[]).length;
     }
     getLines() {
-        return this.buff.split(/\n/g);
+        return this.buff.split('\n');
+    }
+    getLinesCount() {
+        return (this.buff.match(/\n/g)||[]).length+1;
     }
     getFixedCursor() {
         let cx = this.cx;
@@ -51,56 +56,82 @@ class BufferWindow extends Window {
     update ( input, evt, catches ) {
         let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
 
-        let lines = this.buff.split(/\n/g);
-
         if (evt == UpdateEvent.Input) {
             let i = this.getCursorIndex();
-            let fix = ()=>[this.cx,this.cy]=this.getFixedCursor();
+            let fix = (nocur) => {
+                if (!nocur) [this.cx,this.cy] = this.getFixedCursor();
+                let [cx,cy] = this.getFixedCursor();
+                while (cy-this.sy+2 > sout.rows-1)
+                    this.sy++;
+                while (cy-this.sy < 0)
+                    this.sy--;
+                while (cx-this.sx+6 > sout.columns)
+                    this.sx++;
+                while (cx-this.sx < 0)
+                    this.sx--;
+            }
             if (input == '\x7f') {
                 this.buff = this.buff.slice(0,i-1) + this.buff.slice(i);
                 this.cx--;
-                if (this.cx < 0) {
+                if (this.cx < 0 && this.cy > 0) {
                     this.cx = Infinity;
                     this.cy--;
                 }
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
             }   
             else if (input == '\x1b')
                 ;
-            else if (input == '\x1b[A')
+            else if (input == '\x1b[A') {
                 this.cy = Math.max(0,this.cy-1);
-            else if (input == '\x1b[B')
-                this.cy = Math.min(lines.length-1,this.cy+1);
+                fix(true);
+            }
+            else if (input == '\x1b[B') {
+                this.cy = Math.min(this.getLinesCount()-1,this.cy+1);
+                fix(true);
+            }
             else if (input == '\x1b[C') {
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
                 this.cx++;
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
             }
             else if (input == '\x1b[D') {
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
                 this.cx--;
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
             }
-            else if (input == '\x1b[H')
+            else if (input == '\x1b[1;5A')
+                this.sy = Math.max(0,this.sy-1);
+            else if (input == '\x1b[1;5B')
+                this.sy++;
+            else if (input == '\x1b[1;5D')
+                this.sx = Math.max(0,this.sx-1);
+            else if (input == '\x1b[1;5C')
+                this.sx++;
+            else if (input == '\x1b[H') {
                 this.cx = 0;
+                fix();
+            }
             else if (input == '\x1b[F') {
                 this.cx = Infinity;
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
             }
             else if (input == '\r' || input == '\n') {
                 this.buff = this.buff.slice(0,i) + '\n' + this.buff.slice(i);
                 this.cy++
                 this.cx = 0;
-                [this.cx,this.cy] = this.getFixedCursor();
+                fix();
             }
             else if (!input.startsWith('\x1b')) {
-                this.buff = this.buff.slice(0,i) + input + this.buff.slice(i);
-                this.cx++;
+                let inp = Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
+                this.buff = this.buff.slice(0,i) + inp + this.buff.slice(i);
+                this.cx += inp.length;
                 fix();
             }
         }
 
-        for (let i = 0; i < sout.rows-1; i++) {
+        let lines = this.buff.split('\n');
+
+        for (let i = 0; i < sout.rows-2; i++) {
             let li = i+1;
             let ll = i+this.sy;
             let ln = (i+this.sy+1).toString().padStart(3,' ').slice(0,3)+' ';
@@ -114,20 +145,50 @@ class BufferWindow extends Window {
             if (l != undefined)
                 for (let j = 0; j < l.length && j < sout.columns-ln.length; j++) {
                     let ci = j+this.sx;
-                    w[li][ci+ln.length] = l[ci];
+                    if (j == 0 && ci != 0)
+                        w[li][j+ln.length] = '\x1b[90m…\x1b[39m';
+                    else
+                        w[li][j+ln.length] = l[ci]||' ';
                 }
+            else
+                w[li][ln.length+1] = '\x1b[90m~\x1b[39m';
         }
+
+        w[sout.rows-1][0] = '\x1b[40m[';
+        w[sout.rows-1][sout.columns-1] = ']\x1b[49m';
 
         if (catches)
             return w;
         else {
-            w[0][0] = '⟦';
-            w[0][sout.columns-1] = '⟧';
-            let msg = '<buffer>';
-            for (let i = 0; i < msg.length; i++)
-                w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+            w[0][0] = '[';
+            w[0][sout.columns-1] = ']';
+            {
+                let msg = '<buffer>';
+                for (let i = 0; i < msg.length; i++)
+                    w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+            }
+            {
+                const msg = 'buffer';
+                for (let i = 0; i < msg.length; i++)
+                    w[sout.rows-1][i+2] = msg[i];
+                w[sout.rows-1][1] += '\x1b[35m';
+                w[sout.rows-1][1+dlen(msg)] += '\x1b[39m';
+            }
+            {
+                const msg = (this.cy+1).toString().padStart(3,' ');
+                for (let i = 0; i < msg.length; i++)
+                    w[sout.rows-1][sout.columns-9+i] = msg[i];
+            }
+            {
+                const msg = (this.cx+1).toString().padEnd(3,' ');
+                for (let i = 0; i < msg.length; i++)
+                    w[sout.rows-1][sout.columns-5+i] = msg[i];
+            }
+            w[sout.rows-1][sout.columns-6] = '\x1b[39m:\x1b[33m';
+            w[sout.rows-1][sout.columns-3] += '\x1b[39m';
+            w[sout.rows-1][sout.columns-10] += '\x1b[33m';
             let [cx,cy] = this.getFixedCursor();
-            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,cy+this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx+this.sx))+4}H`);
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows-1,cy-this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx-this.sx))+5}H`);
         }
     }
 }
@@ -144,13 +205,33 @@ class FileWindow extends BufferWindow {
             ;
         else {
             let w = super.update(input,evt,true);
-            w[0][0] = '⟦';
-            w[0][sout.columns-1] = '⟧';
+            w[0][0] = '[';
+            w[0][sout.columns-1] = ']';
             let msg = path.basename(this.fp);
             for (let i = 0; i < msg.length; i++)
                 w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+            {
+                const msg = 'file';
+                for (let i = 0; i < msg.length; i++)
+                    w[sout.rows-1][i+2] = msg[i];
+                w[sout.rows-1][1] += '\x1b[35m';
+                w[sout.rows-1][1+dlen(msg)] += '\x1b[39m';
+            }
+            {
+                const msg = (this.cy+1).toString().padStart(3,' ');
+                for (let i = 0; i < msg.length; i++)
+                    w[sout.rows-1][sout.columns-9+i] = msg[i];
+            }
+            {
+                const msg = (this.cx+1).toString().padEnd(3,' ');
+                for (let i = 0; i < msg.length; i++)
+                    w[sout.rows-1][sout.columns-5+i] = msg[i];
+            }
+            w[sout.rows-1][sout.columns-6] = '\x1b[39m:\x1b[33m';
+            w[sout.rows-1][sout.columns-3] += '\x1b[39m';
+            w[sout.rows-1][sout.columns-10] += '\x1b[33m';
             let [cx,cy] = this.getFixedCursor();
-            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,cy+this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx+this.sx))+5}H`);
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows-1,cy-this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx-this.sx))+5}H`);
         }
     }
 }
@@ -178,30 +259,23 @@ class OpenWindow extends Window {
             }
         }
         else if (!input.startsWith('\x1b'))
-            this.p += Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 16).map(c=>String.fromCharCode(c)).join('');
+            this.p += Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
         
         // Rendering
     
         let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
-        
-        for (let x = 0; x < sout.columns; x++)
-            w[0][x] = w[sout.rows-1][x] = '\u2550';
-        for (let y = 0; y < sout.rows; y++)
-            w[y][0] = w[y][sout.columns-1] = '\u2551';
-        w[0][0] = '\u2554';
-        w[0][sout.columns-1] = '\u2557';
-        w[sout.rows-1][0] = '\u255A';
-        w[sout.rows-1][sout.columns-1] = '\u255D';
 
-        const msg = '\u2561Open a file\u255E';
-        for (let i = 0; i < dlen(msg); i++)
-            w[0][i+Math.floor(sout.columns/2-dlen(msg)/2)] = msg[i];
+        w[0][0] = '\x1b[40m[';
+        w[0][sout.columns-1] = ']\x1b[49m';
+        const msg = 'Open a file';
+        for (let i = 0; i < msg.length; i++)
+            w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
         
-        const prevp = ' ⟫ ';
+        const prevp = '⟫ ';
         const p = prevp+this.p;
         for (let i = 0; i < dlen(p); i++) 
-            w[1][i+1] = p[i];
-        w[1][dlen(prevp)] += '\x1b[36m';
+            w[1][i] = p[i];
+        w[1][dlen(prevp)-1] += '\x1b[36m';
         w[1][dlen(p)] += '\x1b[39m';
 
         if (evt == UpdateEvent.Input) {
@@ -227,7 +301,7 @@ class OpenWindow extends Window {
             }
         }
         
-        sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[2;${this.p.length+5}H`);
+        sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[2;${dlen(p)+1}H`);
     }
 }
 
@@ -325,6 +399,10 @@ function update(inbuff,evt) {
         if (0) {}
         else if (inbuff == '\x03')
             quit = true;
+        else if (inbuff == '\x0e') {
+            windows.windows.push(new BufferWindow());
+            windows.selected = windows.windows.length-1;
+        }
         else if (matches('\x0f')) {
             windows.selected = windows.windows.findIndex(w=>w instanceof OpenWindow);
             if (windows.selected == -1) {
