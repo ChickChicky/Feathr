@@ -3,6 +3,8 @@ const util = require('node:util');
 const crypto = require('node:crypto');
 const path = require('node:path');
 
+const lev = require('js-levenshtein');
+
 const VERSION = 'pre-2.0.0';
 
 const sout = process.stdout;
@@ -45,6 +47,8 @@ class OpenWindow extends Window {
         // Input handling
         if (input == '\x7f')
             this.p = this.p.slice(0,this.p.length-1);
+        else if (input == '\x1b')
+            windows.windows = windows.windows.filter(w=>w!=this);
         else if (!input.startsWith('\x1b'))
             this.p += Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 16).map(c=>String.fromCharCode(c)).join('');
         // Rendering
@@ -77,7 +81,9 @@ class OpenWindow extends Window {
             if (fs.existsSync(pp) && fs.statSync(pp).isDirectory())
                 fs.promises.readdir(pp).then(
                     files => {
-                        this.f = files.filter(f=>f.includes(pt.at(-1))).map(f=>({fn:f,s:fs.statSync(path.join(pp,f))}));
+                        this.f = files.map(f=>({fn:f,s:fs.statSync(path.join(pp,f))}));
+                        let idx = this.f.map((f,i)=>[f,lev(f.fn,pt.at(-1))-f.fn.includes(pt.at(-1))*(pt.at(-1).length+1),i]).sort((a,b)=>a[1]-b[1]);
+                        this.f = idx.map(([f,s,i])=>this.f[i]);
                     }
                 );
         }
