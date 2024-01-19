@@ -34,10 +34,71 @@ class BufferWindow extends Window {
         this.cy = 0;
         this.buff = buff||'';
     }
+    getLines() {
+        return this.buff.split(/\n/g);
+    }
+    getFixedCursor() {
+        let cx = this.cx;
+        let cy = this.cy;
+        let l = this.getLines();
+        cx = Math.max(0,Math.min((l[cy]||'').length,cx));
+        return [cx,cy,l];
+    }
+    getCursorIndex() {
+        let [cx,cy,l] = this.getFixedCursor();
+        return l.slice(0,cy).map(l=>l.length+1).reduce((acc,l)=>acc+l,0)+cx;
+    }
     update ( input, evt, catches ) {
         let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
-        
-        let lines = this.buff.split('\n');
+
+        let lines = this.buff.split(/\n/g);
+
+        if (evt == UpdateEvent.Input) {
+            let i = this.getCursorIndex();
+            let fix = ()=>[this.cx,this.cy]=this.getFixedCursor();
+            if (input == '\x7f') {
+                this.buff = this.buff.slice(0,i-1) + this.buff.slice(i);
+                this.cx--;
+                if (this.cx < 0) {
+                    this.cx = Infinity;
+                    this.cy--;
+                }
+                [this.cx,this.cy] = this.getFixedCursor();
+            }   
+            else if (input == '\x1b')
+                ;
+            else if (input == '\x1b[A')
+                this.cy = Math.max(0,this.cy-1);
+            else if (input == '\x1b[B')
+                this.cy = Math.min(lines.length-1,this.cy+1);
+            else if (input == '\x1b[C') {
+                [this.cx,this.cy] = this.getFixedCursor();
+                this.cx++;
+                [this.cx,this.cy] = this.getFixedCursor();
+            }
+            else if (input == '\x1b[D') {
+                [this.cx,this.cy] = this.getFixedCursor();
+                this.cx--;
+                [this.cx,this.cy] = this.getFixedCursor();
+            }
+            else if (input == '\x1b[H')
+                this.cx = 0;
+            else if (input == '\x1b[F') {
+                this.cx = Infinity;
+                [this.cx,this.cy] = this.getFixedCursor();
+            }
+            else if (input == '\r' || input == '\n') {
+                this.buff = this.buff.slice(0,i) + '\n' + this.buff.slice(i);
+                this.cy++
+                this.cx = 0;
+                [this.cx,this.cy] = this.getFixedCursor();
+            }
+            else if (!input.startsWith('\x1b')) {
+                this.buff = this.buff.slice(0,i) + input + this.buff.slice(i);
+                this.cx++;
+                fix();
+            }
+        }
 
         for (let i = 0; i < sout.rows-1; i++) {
             let li = i+1;
@@ -65,7 +126,8 @@ class BufferWindow extends Window {
             let msg = '<buffer>';
             for (let i = 0; i < msg.length; i++)
                 w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
-            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,this.cy+this.sy+1))+1};${Math.max(4,Math.min(sout.columns,this.cx+this.sx+1))+1}H`);
+            let [cx,cy] = this.getFixedCursor();
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,cy+this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx+this.sx))+4}H`);
         }
     }
 }
@@ -87,7 +149,8 @@ class FileWindow extends BufferWindow {
             let msg = path.basename(this.fp);
             for (let i = 0; i < msg.length; i++)
                 w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
-            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,this.cy+this.sy+1))+1};${Math.max(4,Math.min(sout.columns,this.cx+this.sx+1))+1}H`);
+            let [cx,cy] = this.getFixedCursor();
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,cy+this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx+this.sx))+5}H`);
         }
     }
 }
