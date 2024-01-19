@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const util = require('node:util');
-const crypto = require('node:crypto');
 const path = require('node:path');
 
 const lev = require('js-levenshtein');
@@ -27,11 +26,69 @@ class Window {
 }
 
 class BufferWindow extends Window {
-    constructor ( fp ) {
-        this.fp = fp;
+    constructor ( buff ) {
+        super();
+        this.sx = 0;
+        this.sy = 0;
+        this.cx = 0;
+        this.cy = 0;
+        this.buff = buff||'';
     }
-    update ( input ) {
+    update ( input, evt, catches ) {
+        let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
         
+        let lines = this.buff.split('\n');
+
+        for (let i = 0; i < sout.rows-1; i++) {
+            let li = i+1;
+            let ll = i+this.sy;
+            let ln = (i+this.sy+1).toString().padStart(3,' ').slice(0,3)+' ';
+            for (let j = 0; j < ln.length; j++)
+                w[li][j] = ln[j];
+            if (i+this.sy == this.cy) {
+                w[li][0] = '\x1b[7m'+w[li][0];
+                w[li][ln.length-2] += '\x1b[27m';
+            }
+            let l = lines[ll];
+            if (l != undefined)
+                for (let j = 0; j < l.length && j < sout.columns-ln.length; j++) {
+                    let ci = j+this.sx;
+                    w[li][ci+ln.length] = l[ci];
+                }
+        }
+
+        if (catches)
+            return w;
+        else {
+            w[0][0] = '⟦';
+            w[0][sout.columns-1] = '⟧';
+            let msg = '<buffer>';
+            for (let i = 0; i < msg.length; i++)
+                w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,this.cy+this.sy+1))+1};${Math.max(4,Math.min(sout.columns,this.cx+this.sx+1))+1}H`);
+        }
+    }
+}
+
+class FileWindow extends BufferWindow {
+    constructor ( fp ) {
+        let n = !fs.existsSync(fp);
+        super(!n?fs.readFileSync(fp,'utf-8').replace(/\r\n/g,'\n'):'');
+        this.fp = fp;
+        this.new = n;
+    }
+    update ( input, evt ) {
+        if (input == '\x13') // Ctrl+S
+            ;
+        else {
+            let w = super.update(input,evt,true);
+            w[0][0] = '⟦';
+            w[0][sout.columns-1] = '⟧';
+            let msg = path.basename(this.fp);
+            for (let i = 0; i < msg.length; i++)
+                w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows,this.cy+this.sy+1))+1};${Math.max(4,Math.min(sout.columns,this.cx+this.sx+1))+1}H`);
+        }
     }
 }
 
@@ -45,13 +102,23 @@ class OpenWindow extends Window {
     }
     update ( input, evt ) {
         // Input handling
+        
         if (input == '\x7f')
             this.p = this.p.slice(0,this.p.length-1);
         else if (input == '\x1b')
             windows.windows = windows.windows.filter(w=>w!=this);
+        else if (input == '\r' || input == '\n') {
+            if (!fs.existsSync(this.f) || fs.statSync(this.f).isFile()) {
+                windows.windows = windows.windows.filter(w=>w!=this);
+                windows.windows.push(new FileWindow(this.p));
+                windows.selected = windows.windows.length-1;
+            }
+        }
         else if (!input.startsWith('\x1b'))
             this.p += Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 16).map(c=>String.fromCharCode(c)).join('');
+        
         // Rendering
+    
         let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
         
         for (let x = 0; x < sout.columns; x++)
