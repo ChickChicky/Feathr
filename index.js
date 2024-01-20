@@ -35,6 +35,7 @@ class BufferWindow extends Window {
         /** @type {string} */
         this.buff = buff||'';
         this.cr = (this.buff.match(/\r/g)||[]).length*1.5 >= (this.buff.match(/\n/g)||[]).length;
+        this.m = false;
     }
     getLines() {
         return this.buff.split('\n');
@@ -59,8 +60,8 @@ class BufferWindow extends Window {
         if (evt == UpdateEvent.Input) {
             let i = this.getCursorIndex();
             let fix = (nocur) => {
-                if (!nocur) [this.cx,this.cy] = this.getFixedCursor();
                 let [cx,cy] = this.getFixedCursor();
+                if (!nocur) [this.cx,this.cy] = [cx,cy];
                 while (cy-this.sy+2 > sout.rows-1)
                     this.sy++;
                 while (cy-this.sy < 0)
@@ -78,6 +79,20 @@ class BufferWindow extends Window {
                     this.cy--;
                 }
                 fix();
+                this.m = true;
+            }
+            else if (input == '\x13') { // ^S
+                windows.windows.push(new NewFileWindow(fp=>{
+                    if (fp) {
+                        windows.windows = windows.windows.filter(w=>w!=this);
+                        fs.writeFileSync(fp,this.cr?this.buff.replace(/\n/g,'\r\n'):this.buff);
+                        let w = new FileWindow(fp);
+                        Object.assign(w,this);
+                        windows.windows.push(w);
+                        windows.selected = windows.windows.length-1;    
+                    }
+                }));
+                windows.selected = windows.windows.length-1;
             }   
             else if (input == '\x1b')
                 ;
@@ -120,12 +135,14 @@ class BufferWindow extends Window {
                 this.cy++
                 this.cx = 0;
                 fix();
+                this.m = true;
             }
             else if (!input.startsWith('\x1b')) {
                 let inp = Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
                 this.buff = this.buff.slice(0,i) + inp + this.buff.slice(i);
                 this.cx += inp.length;
                 fix();
+                this.m = true;
             }
         }
 
@@ -151,7 +168,7 @@ class BufferWindow extends Window {
                         w[li][j+ln.length] = l[ci]||' ';
                 }
             else
-                w[li][ln.length+1] = '\x1b[90m~\x1b[39m';
+                w[li][ln.length] = '\x1b[90m~\x1b[39m';
         }
 
         w[sout.rows-1][0] = '\x1b[40m[';
@@ -162,11 +179,13 @@ class BufferWindow extends Window {
         else {
             w[0][0] = '[';
             w[0][sout.columns-1] = ']';
+            w[0][sout.columns-3] = '\x1b[33m'+(this.m?'M':' ')+'\x1b[39m';
             {
-                let msg = '<buffer>';
+                let msg = '<new buffer>';
                 for (let i = 0; i < msg.length; i++)
                     w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
             }
+            let [cx,cy] = this.getFixedCursor();
             {
                 const msg = 'buffer';
                 for (let i = 0; i < msg.length; i++)
@@ -175,19 +194,18 @@ class BufferWindow extends Window {
                 w[sout.rows-1][1+dlen(msg)] += '\x1b[39m';
             }
             {
-                const msg = (this.cy+1).toString().padStart(3,' ');
+                const msg = (cy+1).toString().padStart(3,' ');
                 for (let i = 0; i < msg.length; i++)
                     w[sout.rows-1][sout.columns-9+i] = msg[i];
             }
             {
-                const msg = (this.cx+1).toString().padEnd(3,' ');
+                const msg = (cx+1).toString().padEnd(3,' ');
                 for (let i = 0; i < msg.length; i++)
                     w[sout.rows-1][sout.columns-5+i] = msg[i];
             }
             w[sout.rows-1][sout.columns-6] = '\x1b[39m:\x1b[33m';
             w[sout.rows-1][sout.columns-3] += '\x1b[39m';
             w[sout.rows-1][sout.columns-10] += '\x1b[33m';
-            let [cx,cy] = this.getFixedCursor();
             sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows-1,cy-this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx-this.sx))+5}H`);
         }
     }
@@ -201,15 +219,21 @@ class FileWindow extends BufferWindow {
         this.new = n;
     }
     update ( input, evt ) {
-        if (input == '\x13') // Ctrl+S
-            ;
+        if (input == '\x13') { // Ctrl+S
+            fs.writeFileSync(this.fp,this.cr?this.buff.replace(/\n/g,'\r\n'):this.buff);
+            this.m = false;
+            this.new = false;
+        }
         else {
             let w = super.update(input,evt,true);
             w[0][0] = '[';
             w[0][sout.columns-1] = ']';
+            w[0][sout.columns-3] = '\x1b[33m'+(this.m?'M':' ')+'\x1b[39m';
+            w[0][sout.columns-4] = '\x1b[33m'+(this.new?'N':' ')+'\x1b[39m';
             let msg = path.basename(this.fp);
             for (let i = 0; i < msg.length; i++)
                 w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+            let [cx,cy] = this.getFixedCursor();
             {
                 const msg = 'file';
                 for (let i = 0; i < msg.length; i++)
@@ -218,25 +242,24 @@ class FileWindow extends BufferWindow {
                 w[sout.rows-1][1+dlen(msg)] += '\x1b[39m';
             }
             {
-                const msg = (this.cy+1).toString().padStart(3,' ');
+                const msg = (cy+1).toString().padStart(3,' ');
                 for (let i = 0; i < msg.length; i++)
                     w[sout.rows-1][sout.columns-9+i] = msg[i];
             }
             {
-                const msg = (this.cx+1).toString().padEnd(3,' ');
+                const msg = (cx+1).toString().padEnd(3,' ');
                 for (let i = 0; i < msg.length; i++)
                     w[sout.rows-1][sout.columns-5+i] = msg[i];
             }
             w[sout.rows-1][sout.columns-6] = '\x1b[39m:\x1b[33m';
             w[sout.rows-1][sout.columns-3] += '\x1b[39m';
             w[sout.rows-1][sout.columns-10] += '\x1b[33m';
-            let [cx,cy] = this.getFixedCursor();
             sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows-1,cy-this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx-this.sx))+5}H`);
         }
     }
 }
 
-class OpenWindow extends Window {
+class OpenFileWindow extends Window {
     constructor () {
         super();
         this.p = path.resolve(process.cwd())+path.sep;//.split(RegExp(path.sep,'g'));
@@ -252,7 +275,7 @@ class OpenWindow extends Window {
         else if (input == '\x1b')
             windows.windows = windows.windows.filter(w=>w!=this);
         else if (input == '\r' || input == '\n') {
-            if (!fs.existsSync(this.f) || fs.statSync(this.f).isFile()) {
+            if (!fs.existsSync(this.p) || fs.statSync(this.p).isFile()) {
                 windows.windows = windows.windows.filter(w=>w!=this);
                 windows.windows.push(new FileWindow(this.p));
                 windows.selected = windows.windows.length-1;
@@ -290,6 +313,80 @@ class OpenWindow extends Window {
                         this.f = idx.map(([f,s,i])=>this.f[i]);
                     }
                 );
+        }
+
+        for (let i = 0; i < sout.rows-5 && i < this.f.length; i++) {
+            for (let j = 0; j < this.f[i].fn.length; j++)
+                w[i+3][2+j] = this.f[i].fn[j];
+            if (this.f[i].s.isDirectory()) {
+                w[i+3][1] += '\x1b[34m';
+                w[i+3][this.f[i].fn.length+1] += '\x1b[39m';
+            }
+        }
+        
+        sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[2;${dlen(p)+1}H`);
+    }
+}
+
+class NewFileWindow extends Window {
+    constructor ( h ) {
+        super();
+        this.p = path.resolve(process.cwd())+path.sep;//.split(RegExp(path.sep,'g'));
+        this.f = [];
+        this.o = 0;
+        this.d = 1;
+        this.h = h;
+        this.fresh = true;
+    }
+    update ( input, evt ) {
+        // Input handling
+        
+        if (input == '\x7f')
+            this.p = this.p.slice(0,this.p.length-1);
+        else if (input == '\x1b') {
+            this.h(null);
+            windows.windows = windows.windows.filter(w=>w!=this);
+        }
+        else if (input == '\r' || input == '\n') {
+            if (!fs.existsSync(this.p)) {
+                windows.windows = windows.windows.filter(w=>w!=this);
+                this.h(this.p);
+            }
+        }
+        else if (!input.startsWith('\x1b'))
+            this.p += Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
+        
+        // Rendering
+    
+        let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
+
+        w[0][0] = '\x1b[40m[';
+        w[0][sout.columns-1] = ']\x1b[49m';
+        const msg = 'Save a file';
+        for (let i = 0; i < msg.length; i++)
+            w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+        
+        const prevp = '⟫ ';
+        const p = prevp+this.p;
+        for (let i = 0; i < dlen(p); i++) 
+            w[1][i] = p[i];
+        w[1][dlen(prevp)-1] += '\x1b[36m';
+        w[1][dlen(p)] += '\x1b[39m';
+
+        if (evt == UpdateEvent.Input || this.fresh) {
+            let pt = this.p.split(/\\|\//g);
+            let pp = (path.sep+pt.slice(0,-1).join(path.sep)).replace(RegExp(path.sep+path.sep,'g'),path.sep);
+
+            if (fs.existsSync(pp) && fs.statSync(pp).isDirectory())
+                fs.promises.readdir(pp).then(
+                    files => {
+                        this.f = files.map(f=>({fn:f,s:fs.statSync(path.join(pp,f))}));
+                        let idx = this.f.map((f,i)=>[f,lev(f.fn,pt.at(-1))-f.fn.includes(pt.at(-1))*(pt.at(-1).length+1),i]).sort((a,b)=>a[1]-b[1]);
+                        this.f = idx.map(([f,s,i])=>this.f[i]);
+                    }
+                );
+
+            this.fresh = false;
         }
 
         for (let i = 0; i < sout.rows-5 && i < this.f.length; i++) {
@@ -376,7 +473,7 @@ function update(inbuff,evt) {
 
 ;(async()=>{
 
-    sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffe
+    sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
     sin.setRawMode(true);
 
     await update('',UpdateEvent.Init);
@@ -404,9 +501,9 @@ function update(inbuff,evt) {
             windows.selected = windows.windows.length-1;
         }
         else if (matches('\x0f')) {
-            windows.selected = windows.windows.findIndex(w=>w instanceof OpenWindow);
+            windows.selected = windows.windows.findIndex(w=>w instanceof OpenFileWindow);
             if (windows.selected == -1) {
-                windows.windows.push(new OpenWindow());
+                windows.windows.push(new OpenFileWindow());
                 windows.selected = windows.windows.length-1;
             }
         }
