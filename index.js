@@ -1,10 +1,13 @@
 const fs = require('node:fs');
 const util = require('node:util');
 const path = require('node:path');
+const { Worker } = require('node:worker_threads');
 
 const lev = require('js-levenshtein');
 
 const VERSION = 'pre-2.0.0';
+
+const modulesPath = path.join(__dirname,'modules');
 
 const sout = process.stdout;
 const sin = process.stdin;
@@ -20,8 +23,149 @@ const UpdateEvent = Object.freeze({
 
 var quit = false;
 
+class Logger {
+
+    static formatDate( d ) {
+        return d.toLocaleString('en-GB',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    }
+    
+    static now() {
+        return Logger.formatDate(new Date());
+    }
+
+    constructor ( fp ) {
+        this.fp = fp;
+        this.lines = [];
+        if (!fs.existsSync(path.dirname(this.fp))) {
+            fs.mkdirSync(path.dirname(this.fp),{recursive:true});
+        }
+    }
+
+    log( ...args ) {
+        let t = Logger.now() + ' \x1b[36m[log]\x1b[39m ' + args.map( v => typeof v == 'string' ? v : util.inspect(v,{compact:false}) );
+        fs.appendFileSync(this.fp,util.stripVTControlCharacters(t)+'\n',{encoding:'utf-8'});
+        this.lines.push(t);
+    }
+
+    error( ...args ) {
+        let t = Logger.now() + ' \x1b[31m[err]\x1b[39m ' + args.map( v => typeof v == 'string' ? v : util.inspect(v,{compact:false}) );
+        fs.appendFileSync(this.fp,util.stripVTControlCharacters(t)+'\n',{encoding:'utf-8'});
+        this.lines.push(t);
+    }
+
+}
+
+const loggerError = new Logger( path.join(__dirname,'logs','error.log') );
+const logger = new Logger( path.join(__dirname,'logs','log.log') );
+
+/**
+ * @member {string} id
+ * @member {object} meta
+ * @member {Worker} mod
+ */
+class Module {
+    /**
+     * @param {string} id
+     * @param {object} meta
+     * @param {Worker} mod
+     */
+    constructor ( id, meta, mod ) {
+        this.id = id;
+        this.meta = meta;
+        this.mod = mod;
+    }
+}
+
+class Modules {
+    constructor () {
+        /** @type {Module[]} */
+        this.modules = [];
+        this.modes = {};
+    }
+    /** @param {Module} module */
+    addModule( module ) {
+        this.modules.push(module);
+        module.mod.on('message',(msg)=>{
+            if (typeof msg != 'object') return;
+            if (msg.type == 'register-mode') {
+                if (typeof msg.payload == 'string') {
+                    this.modes[msg.payload] = module.id;
+                } else {
+                    loggerError.error(`Invalid \`register-mode\` payload for \`${module.id}\`:`,msg.payload);
+                }
+            }
+            if (msg.type == 'update-style') {
+                const win = windows.windows.find(w=>w.id == msg.payload.id);
+                if (win) win.style = msg.payload.style;
+                win.update('',UpdateEvent.Update);
+            }
+            logger.log(msg);
+        });
+    }
+    /** @param {BufferWindow} buff */
+    updateBuffer( buff ) {
+        let mid = this.modes[buff.mode];
+        let mod = this.modules.find(m=>m.id == mid);
+        if (buff.mode != null && mid != undefined && mod != undefined) {
+            mod.mod.postMessage({type:'buffer-update',payload:{id:buff.id,buff:buff.buff,cx:buff.cx,cy:buff.cy,mode:buff.mode}});
+            logger.log('hi');
+        }
+    }
+}
+
+/**
+ * @param {string} from
+ * @param {Modules} modules
+ */
+function loadModules( from, modules ) {
+    if (fs.existsSync(from) && fs.statSync(from).isDirectory()) {
+        for (const modf of fs.readdirSync(from)) {
+            const modp = path.join(from,modf)
+            if (fs.existsSync(modp) && fs.statSync(modp).isDirectory()) {
+                const metap = path.join(modp,'module.json');
+                if (fs.existsSync(metap) && fs.statSync(metap).isFile()) {
+                    let meta;
+                    try {
+                        const metas = fs.readFileSync(metap);
+                        meta = JSON.parse(metas);
+                    } catch (e) {
+                        loggerError.error(`Failed to load module.json for \`${modf}\`\n`,e);
+                    }
+                    if (meta) {
+                        if (typeof meta.id == 'string' && typeof meta.entry == 'string' && fs.existsSync(path.join(modp,meta.entry)) && fs.statSync(path.join(modp,meta.entry)).isFile()) {
+                            modules.addModule(new Module(meta.id,meta,new Worker(path.join(modp,meta.entry))));
+                        } else {
+                            if (typeof meta.id != 'string') {
+                                loggerError.error(`Failed to load module \`${modf}\`, invalid module ID`);
+                            } else
+                            if (typeof meta.entry == 'string') {
+                                loggerError.error(`Failed to load module \`${modf}\`, invalid module entry`);
+                            } else
+                            if (!fs.existsSync(path.join(modp,meta.entry))) {
+                                loggerError.error(`Failed to load module \`${modf}\`, entry not found`);
+                            } else
+                            if (!fs.statSync(path.join(modp,meta.entry)).isFile()) {
+                                loggerError.error(`Failed to load module \`${modf}\`, entry is not a file`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        if (!fs.existsSync(from)) {
+            loggerError.error(`Attempt to load modules from a non-existing path (\`${from}\`)`);
+        }
+        else {
+            loggerError.error(`Attempt to load modules from a non-folder (\`${from}\`)`);
+        }
+    }
+}
+
 class Window {
-    constructor () {}
+    constructor () {
+        this.id = Date.now().toString(36) + (Math.random()*36**11).toString(36);
+    }
     update (input) {}
 }
 
@@ -36,6 +180,8 @@ class BufferWindow extends Window {
         this.buff = buff||'';
         this.cr = (this.buff.match(/\r/g)||[]).length*1.5 >= (this.buff.match(/\n/g)||[]).length;
         this.m = false;
+        this.mode = 'foo-lang';
+        this.style = [];
     }
     getLines() {
         return this.buff.split('\n');
@@ -144,6 +290,7 @@ class BufferWindow extends Window {
                 fix();
                 this.m = true;
             }
+            modules.updateBuffer(this);
         }
 
         let lines = this.buff.split('\n');
@@ -165,7 +312,7 @@ class BufferWindow extends Window {
                     if (j == 0 && ci != 0)
                         w[li][j+ln.length] = '\x1b[90m…\x1b[39m';
                     else
-                        w[li][j+ln.length] = l[ci]||' ';
+                        w[li][j+ln.length] = this.style.filter(s=>(s.l0>ll&&s.l1<ll)||(s.l0==ll&&ci>=s.c0&&(s.l0!=s.l1||ci<=s.c1))||(s.l1==ll&&ci<=s.c1&&(s.l0!=s.l1||ci>=s.c0))).map(s=>s.s).join('')+(l[ci]||' ')+'\x1b[39;49m';
                 }
             else
                 w[li][ln.length] = '\x1b[90m~\x1b[39m';
@@ -259,7 +406,7 @@ class FileWindow extends BufferWindow {
     }
 }
 
-class OpenFileWindow extends Window {
+class OpenFileWindow extends Window { 
     constructor () {
         super();
         this.p = path.resolve(process.cwd())+path.sep;//.split(RegExp(path.sep,'g'));
@@ -402,6 +549,13 @@ class NewFileWindow extends Window {
     }
 }
 
+class WindowsListWindow extends Window {
+
+}
+
+const modules = new Modules();
+loadModules(modulesPath,modules);
+
 const windows = {
     windows : [
 
@@ -514,6 +668,13 @@ function update(inbuff,evt) {
     
     clearInterval(ui);
 
+    for (let module of modules.modules) {
+        module.mod.unref();
+        await module.mod.terminate();
+    }
+
     await Promise.allSettled(up);
+
+    process.exit();
 
 })();
