@@ -99,7 +99,6 @@ class Modules {
                 if (win) win.style = msg.payload.style;
                 win.update('',UpdateEvent.Update);
             }
-            logger.log(msg);
         });
     }
     /** @param {BufferWindow} buff */
@@ -218,7 +217,7 @@ class BufferWindow extends Window {
                     this.sx--;
             }
             if (input == '\x7f') {
-                this.buff = this.buff.slice(0,i-1) + this.buff.slice(i);
+                this.buff = this.buff.slice(0,Math.max(0,i-1)) + this.buff.slice(i);
                 this.cx--;
                 if (this.cx < 0 && this.cy > 0) {
                     this.cx = Infinity;
