@@ -99,6 +99,10 @@ class Modules {
                 if (win) win.style = msg.payload.style;
                 win.update('',UpdateEvent.Update);
             }
+            if (msg.type == 'register-style') {
+                themes.themes[msg.payload.id] = themes.themes[msg.payload.id] || {};
+                Object.assign(themes.themes[msg.payload.id],msg.payload);
+            }
         });
     }
     /** @param {BufferWindow} buff */
@@ -107,7 +111,6 @@ class Modules {
         let mod = this.modules.find(m=>m.id == mid);
         if (buff.mode != null && mid != undefined && mod != undefined) {
             mod.mod.postMessage({type:'buffer-update',payload:{id:buff.id,buff:buff.buff,cx:buff.cx,cy:buff.cy,mode:buff.mode}});
-            logger.log('hi');
         }
     }
 }
@@ -161,6 +164,42 @@ function loadModules( from, modules ) {
     }
 }
 
+class Themes {
+    constructor () {
+        this.themes = {};
+        this.computed = {};
+        this.currentTheme = null;
+    }
+
+    style( v ) {
+        return v.map(s=>(this.computed[s]||{}).s||'').join('');
+    }
+    
+    computeTheme( name ) {
+        let theme = (Object.entries(this.themes).find(([k,t])=>k==name&&t.kind=='theme')||[{},{styles:{}}])[1];
+        let t = Object.assign({},
+            theme.styles,Object.fromEntries(Object.entries(theme.styles).map(([k,s])=>[name+'.'+k,s])),
+            theme.styles,Object.fromEntries(Object.entries(theme.styles).map(([k,s])=>['THEME.'+k,s])),
+        );
+        for (let [k,u] of Object.entries(this.themes).filter(([k,t])=>t.kind=='applicable')) {
+            for (let [s,v] of Object.entries(u.styles)) {
+                for (let w of v) {
+                    if (typeof w == 'string') {
+                        if (t[w] != undefined) {
+                            t[s] = t[k+'.'+s] = t[w];
+                            break;
+                        }
+                    } else if (typeof w == 'object') {
+                        t[s] = t[k+'.'+s] = w;
+                        break;
+                    }
+                }
+            }
+        }
+        return this.computed = t;
+    }
+}
+
 class Window {
     constructor () {
         this.id = Date.now().toString(36) + (Math.random()*36**11).toString(36);
@@ -203,6 +242,7 @@ class BufferWindow extends Window {
         let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
 
         if (evt == UpdateEvent.Input) {
+            themes.computeTheme('default');
             let i = this.getCursorIndex();
             let fix = (nocur) => {
                 let [cx,cy] = this.getFixedCursor();
@@ -305,16 +345,22 @@ class BufferWindow extends Window {
                 w[li][ln.length-2] += '\x1b[27m';
             }
             let l = lines[ll];
-            if (l != undefined)
+            if (l != undefined) {
                 for (let j = 0; j < l.length && j < sout.columns-ln.length; j++) {
                     let ci = j+this.sx;
                     if (j == 0 && ci != 0)
                         w[li][j+ln.length] = '\x1b[90m…\x1b[39m';
                     else
-                        w[li][j+ln.length] = this.style.filter(s=>(s.l0>ll&&s.l1<ll)||(s.l0==ll&&ci>=s.c0&&(s.l0!=s.l1||ci<=s.c1))||(s.l1==ll&&ci<=s.c1&&(s.l0!=s.l1||ci>=s.c0))).map(s=>s.s).join('')+(l[ci]||' ')+'\x1b[39;49m';
+                        w[li][j+ln.length] = themes.style(['THEME.text','THEME.back'].concat(this.style.filter(s=>(s.l0>ll&&s.l1<ll)||(s.l0==ll&&ci>=s.c0&&(s.l0!=s.l1||ci<=s.c1))||(s.l1==ll&&ci<=s.c1&&(s.l0!=s.l1||ci>=s.c0))).map(s=>s.s)))+(l[ci]||' ')+'\x1b[m';
                 }
-            else
+                /*for (let j = l.length; j < sout.columns-1; j++) {
+                    let s = themes.style(['THEME.back']);
+                    w[li][j+ln.length] = s+' ';
+                }*/
+            }
+            else {
                 w[li][ln.length] = '\x1b[90m~\x1b[39m';
+            }
         }
 
         w[sout.rows-1][0] = '\x1b[40m[';
@@ -552,6 +598,8 @@ class WindowsListWindow extends Window {
 
 }
 
+const themes = new Themes();
+
 const modules = new Modules();
 loadModules(modulesPath,modules);
 
@@ -625,7 +673,6 @@ function update(inbuff,evt) {
 }
 
 ;(async()=>{
-
     sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
     sin.setRawMode(true);
 

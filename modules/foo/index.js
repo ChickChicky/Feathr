@@ -4,6 +4,18 @@ const {
 } = require('node:worker_threads');
 
 parentPort.postMessage({type:'register-mode',payload:'foo-lang'});
+parentPort.postMessage({type:'register-style',payload:{
+    id: 'foo-style',
+    kind: 'applicable',
+    styles: {
+        'foo': [
+            'keyword',
+            {
+                s: '\x1b[31m',
+            }
+        ]
+    }
+}});
 
 class FooBuffer {
     constructor ( buff ) {
@@ -45,7 +57,7 @@ parentPort.on('message',(msg)=>{
         buffer.buff = buff;
         buffer.cx = cx;
         buffer.cy = cy;
-        const style = Array.from(buffer.buff.matchAll(/foo/g)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:'\x1b[33m',c0:c,c1:c+2,l0:l,l1:l}});
+        const style = Array.from(buffer.buff.matchAll(/foo/g)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['foo'],c0:c,c1:c+2,l0:l,l1:l}});
         parentPort.postMessage({type:'update-style',payload:{id,style}});
     }
 });
