@@ -353,14 +353,14 @@ class BufferWindow extends Window {
                     else
                         w[li][j+ln.length] = themes.style(['THEME.text','THEME.back'].concat(this.style.filter(s=>(s.l0>ll&&s.l1<ll)||(s.l0==ll&&ci>=s.c0&&(s.l0!=s.l1||ci<=s.c1))||(s.l1==ll&&ci<=s.c1&&(s.l0!=s.l1||ci>=s.c0))).map(s=>s.s)))+(l[ci]||' ')+'\x1b[m';
                 }
-                /*for (let j = l.length; j < sout.columns-1; j++) {
-                    let s = themes.style(['THEME.back']);
-                    w[li][j+ln.length] = s+' ';
-                }*/
             }
             else {
-                w[li][ln.length] = '\x1b[90m~\x1b[39m';
+                let s = themes.style(['THEME.back','THEME.emptyline']);
+                w[li][ln.length] = s+'~\x1b[m';
             }
+            let s = themes.style(['THEME.back']);
+            w[li][(l==undefined?1:l.length)+ln.length] = s+' ';
+            w[li][sout.columns.length-1] += '\x1b[m';
         }
 
         w[sout.rows-1][0] = '\x1b[40m[';
@@ -673,6 +673,11 @@ function update(inbuff,evt) {
 }
 
 ;(async()=>{
+    if (process.argv.length > 2 && fs.existsSync(process.argv[2])) {
+        windows.windows.push(new FileWindow(process.argv[2]));
+        windows.selected = windows.windows.length - 1;
+    }
+
     sout.write('\x1b[?1049h\x1b[H\x1B[5 q'); // enters alternative screen buffer
     sin.setRawMode(true);
 

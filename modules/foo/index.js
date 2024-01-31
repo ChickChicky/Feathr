@@ -11,9 +11,21 @@ parentPort.postMessage({type:'register-style',payload:{
         'foo': [
             'keyword',
             {
-                s: '\x1b[31m',
+                s: '\x1b[35m',
             }
-        ]
+        ],
+        'bar': [
+            'function',
+            {
+                s: '\x1b[32m',
+            }
+        ],
+        'baz': [
+            'const',
+            {
+                s: '\x1b[33m',
+            }
+        ],
     }
 }});
 
@@ -43,7 +55,7 @@ class FooBuffer {
     }
     getPosOf(i) {
         let b = this.buff.slice(0,i);
-        return [b.length-Math.max(0,b.lastIndexOf('\n')),(b.match(/\n/g)||[]).length];
+        return [b.length-Math.max(-1,b.lastIndexOf('\n'))-1,(b.match(/\n/g)||[]).length];
     }
 }
 
@@ -57,7 +69,12 @@ parentPort.on('message',(msg)=>{
         buffer.buff = buff;
         buffer.cx = cx;
         buffer.cy = cy;
-        const style = Array.from(buffer.buff.matchAll(/foo/g)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['foo'],c0:c,c1:c+2,l0:l,l1:l}});
+        const style = [];
+        style.push(...Array.from(buffer.buff.matchAll(/foo/gi)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['foo'],c0:c,c1:c+2,l0:l,l1:l}}));
+        style.push(...Array.from(buffer.buff.matchAll(/bar/gi)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['bar'],c0:c,c1:c+2,l0:l,l1:l}}));
+        style.push(...Array.from(buffer.buff.matchAll(/baz/gi)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['baz'],c0:c,c1:c+2,l0:l,l1:l}}));
+        style.push(...Array.from(buffer.buff.matchAll(/hello/gi)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['underline-double'],c0:c,c1:c+4,l0:l,l1:l}}));
+        style.push(...Array.from(buffer.buff.matchAll(/world/gi)).map(m=>m.index).map(m=>{const [c,l] = buffer.getPosOf(m); return {s:['italic'],c0:c,c1:c+4,l0:l,l1:l}}));
         parentPort.postMessage({type:'update-style',payload:{id,style}});
     }
 });
