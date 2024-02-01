@@ -42,6 +42,12 @@ parentPort.postMessage({type:'register-style',payload:{
         'back-current': {
             s: '\x1b[48;2;68;71;90m'
         },
+        'back-menu': {
+            s: '\x1b[48;2;15;17;29m'
+        },
+        'menutitle': {
+            s: '\x1b[38;2;189;147;249m'
+        },
 
         'keyword': {
             s: '\x1b[38;2;255;121;198m'

@@ -15,10 +15,11 @@ const sin = process.stdin;
 const dlen = s => util.stripVTControlCharacters(s).length;
 
 const UpdateEvent = Object.freeze({
-    Init   : 'init',
-    Update : 'update',
-    Resize : 'resize',
-    Input  : 'input',
+    Init    : 'init',
+    Update  : 'update',
+    Update2 : 'update2',
+    Resize  : 'resize',
+    Input   : 'input',
 });
 
 var quit = false;
@@ -169,6 +170,7 @@ class Themes {
         this.themes = {};
         this.computed = {};
         this.currentTheme = null;
+        this.theme = 'default';
     }
 
     style( v ) {
@@ -220,6 +222,8 @@ class BufferWindow extends Window {
         this.m = false;
         this.mode = 'foo-lang';
         this.style = [];
+        this.menu = null;
+        this.menustate = {};
     }
     getLines() {
         return this.buff.split('\n');
@@ -241,95 +245,184 @@ class BufferWindow extends Window {
     update ( input, evt, catches ) {
         let w = Array(sout.rows).fill().map(()=>Array(sout.columns).fill().map(()=>' '));
 
+        let pr = w=>{};
+        let ps = ()=>{};
+
         if (evt == UpdateEvent.Input) {
-            themes.computeTheme('default');
-            let i = this.getCursorIndex();
-            let fix = (nocur) => {
-                let [cx,cy] = this.getFixedCursor();
-                if (!nocur) [this.cx,this.cy] = [cx,cy];
-                while (cy-this.sy+2 > sout.rows-1)
-                    this.sy++;
-                while (cy-this.sy < 0)
-                    this.sy--;
-                while (cx-this.sx+6 > sout.columns)
-                    this.sx++;
-                while (cx-this.sx < 0)
-                    this.sx--;
-            }
-            if (input == '\x7f') {
-                this.buff = this.buff.slice(0,Math.max(0,i-1)) + this.buff.slice(i);
-                this.cx--;
-                if (this.cx < 0 && this.cy > 0) {
-                    this.cx = Infinity;
-                    this.cy--;
+            if (this.menu == null) {
+                let i = this.getCursorIndex();
+                let fix = (nocur) => {
+                    let [cx,cy] = this.getFixedCursor();
+                    if (!nocur) [this.cx,this.cy] = [cx,cy];
+                    while (cy-this.sy+2 > sout.rows-1)
+                        this.sy++;
+                    while (cy-this.sy < 0)
+                        this.sy--;
+                    while (cx-this.sx+6 > sout.columns)
+                        this.sx++;
+                    while (cx-this.sx < 0)
+                        this.sx--;
                 }
-                fix();
-                this.m = true;
-            }
-            else if (input == '\x13') { // ^S
-                windows.windows.push(new NewFileWindow(fp=>{
-                    if (fp) {
-                        windows.windows = windows.windows.filter(w=>w!=this);
-                        fs.writeFileSync(fp,this.cr?this.buff.replace(/\n/g,'\r\n'):this.buff);
-                        let w = new FileWindow(fp);
-                        Object.assign(w,this);
-                        windows.windows.push(w);
-                        windows.selected = windows.windows.length-1;    
+                if (input == '\x7f') {
+                    this.buff = this.buff.slice(0,Math.max(0,i-1)) + this.buff.slice(i);
+                    this.cx--;
+                    if (this.cx < 0 && this.cy > 0) {
+                        this.cx = Infinity;
+                        this.cy--;
                     }
-                }));
-                windows.selected = windows.windows.length-1;
-            }   
-            else if (input == '\x1b')
-                ;
-            else if (input == '\x1b[A') {
-                this.cy = Math.max(0,this.cy-1);
-                fix(true);
+                    fix();
+                    this.m = true;
+                }
+                else if (input == '\x13') { // ^S
+                    windows.windows.push(new NewFileWindow(fp=>{
+                        if (fp) {
+                            windows.windows = windows.windows.filter(w=>w!=this);
+                            fs.writeFileSync(fp,this.cr?this.buff.replace(/\n/g,'\r\n'):this.buff);
+                            let w = new FileWindow(fp);
+                            Object.assign(w,this);
+                            windows.windows.push(w);
+                            windows.selected = windows.windows.length-1;    
+                        }
+                    }));
+                    windows.selected = windows.windows.length-1;
+                }   
+                else if (input == '\x1b') {
+                    this.menu = 'command';
+                    this.menustate = { cmd: '', ci: 0 };
+                }
+                else if (input == '\x1b[A') {
+                    this.cy = Math.max(0,this.cy-1);
+                    fix(true);
+                }
+                else if (input == '\x1b[B') {
+                    this.cy = Math.min(this.getLinesCount()-1,this.cy+1);
+                    fix(true);
+                }
+                else if (input == '\x1b[C') {
+                    fix();
+                    this.cx++;
+                    fix();
+                }
+                else if (input == '\x1b[D') {
+                    fix();
+                    this.cx--;
+                    fix();
+                }
+                else if (input == '\x1b[1;5A')
+                    this.sy = Math.max(0,this.sy-1);
+                else if (input == '\x1b[1;5B')
+                    this.sy++;
+                else if (input == '\x1b[1;5D')
+                    this.sx = Math.max(0,this.sx-1);
+                else if (input == '\x1b[1;5C')
+                    this.sx++;
+                else if (input == '\x1b[H') {
+                    this.cx = 0;
+                    fix();
+                }
+                else if (input == '\x1b[F') {
+                    this.cx = Infinity;
+                    fix();
+                }
+                else if (input == '\r' || input == '\n') {
+                    this.buff = this.buff.slice(0,i) + '\n' + this.buff.slice(i);
+                    this.cy++
+                    this.cx = 0;
+                    fix();
+                    this.m = true;
+                }
+                else if (!input.startsWith('\x1b')) {
+                    let inp = Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
+                    this.buff = this.buff.slice(0,i) + inp + this.buff.slice(i);
+                    this.cx += inp.length;
+                    fix();
+                    this.m = true;
+                }
+                modules.updateBuffer(this);
+            } else if (this.menu == 'command') {
+                if (input == '\x1b') {
+                    this.menu = null;
+                }
+                else if (input == '\x1b[C') {
+                    this.menustate.ci++;
+                }
+                else if (input == '\x1b[D') {
+                    this.menustate.ci--;
+                }
+                else if (input == '\x7f') {
+                    this.menustate.cmd = this.menustate.cmd.slice(0,Math.max(0,this.menustate.ci-1)) + this.menustate.cmd.slice(this.menustate.ci);
+                    this.menustate.ci--;
+                }
+                else if (input == '\r') {
+                    let tokens = this.menustate.cmd.split(/ /g);
+                    if (tokens[0] == 'mode' && tokens[1]) {
+                        this.mode = tokens[1];
+                    }
+                    if (tokens[0] == 'theme' && tokens[1]) {
+                        themes.theme = tokens[1];
+                    }
+                    this.menu = null;
+                }
+                else if (!input.startsWith('\x1b')) {
+                    let inp = Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
+                    this.menustate.cmd = this.menustate.cmd.slice(0,this.menustate.ci) + inp + this.menustate.cmd.slice(this.menustate.ci);
+                    this.menustate.ci += inp.length;
+                }
+                this.menustate.ci = Math.max(0,Math.min(this.menustate.cmd.length,this.menustate.ci));
+            } else {
+                this.menu = null;
             }
-            else if (input == '\x1b[B') {
-                this.cy = Math.min(this.getLinesCount()-1,this.cy+1);
-                fix(true);
+        }
+
+        else if (evt == UpdateEvent.Update2) {
+            themes.computeTheme(themes.theme);
+            if (!this.menu) {
+                modules.updateBuffer(this);
             }
-            else if (input == '\x1b[C') {
-                fix();
-                this.cx++;
-                fix();
+        }
+
+        if (this.menu == 'command') {
+            let r = Math.floor(sout.rows/2);
+            pr = w => {
+                let bs = themes.style(['THEME.back-menu']);
+                for (let i = 3; i < sout.columns-3; i++) {
+                    for (let j = r-1; j < r+2; j++) {
+                        w[j][i] = bs+' '+'\x1b[m';
+                    }
+                }
+                let s = [];
+                let tokens = this.menustate.cmd.split(/ /g);
+                let c = ({
+                    'theme': () => {
+                        let t = tokens[1];
+                        if (t && Object.keys(themes.themes).includes(t)) {
+                            s.push({s:'string',c0:tokens[0].length+1,c1:t.length+tokens[0].length});
+                        }    
+                    },
+                    'mode': () => {
+                        let t = tokens[1];
+                        if (t && Object.keys(modules.modes).includes(t)) {
+                            s.push({s:'string',c0:tokens[0].length+1,c1:t.length+tokens[0].length});
+                        }
+                    }
+                }[tokens[0]]);
+                if (c) {
+                    s.push({s:'keyword',c0:0,c1:tokens[0].length-1});
+                    c();
+                }
+                for (let ci = 0; ci < this.menustate.cmd.length; ci++) {
+                    let ts = themes.style(['THEME.back-menu',...s.filter(s=>s.c0<=ci&&s.c1>=ci).map(s=>s.s)]);
+                    w[r][ci+4] = ts+this.menustate.cmd[ci]+'\x1b[m';
+                }
+                let us = themes.style(['THEME.back-menu','THEME.menutitle']);
+                const t = 'command';
+                for (let ci = 0; ci < t.length; ci++) {
+                    w[r-1][ci+4] = us+t[ci]+'\x1b[m';
+                }
             }
-            else if (input == '\x1b[D') {
-                fix();
-                this.cx--;
-                fix();
+            ps = () => {
+                return `\x1b[${r+1};${this.menustate.ci+5}H`;
             }
-            else if (input == '\x1b[1;5A')
-                this.sy = Math.max(0,this.sy-1);
-            else if (input == '\x1b[1;5B')
-                this.sy++;
-            else if (input == '\x1b[1;5D')
-                this.sx = Math.max(0,this.sx-1);
-            else if (input == '\x1b[1;5C')
-                this.sx++;
-            else if (input == '\x1b[H') {
-                this.cx = 0;
-                fix();
-            }
-            else if (input == '\x1b[F') {
-                this.cx = Infinity;
-                fix();
-            }
-            else if (input == '\r' || input == '\n') {
-                this.buff = this.buff.slice(0,i) + '\n' + this.buff.slice(i);
-                this.cy++
-                this.cx = 0;
-                fix();
-                this.m = true;
-            }
-            else if (!input.startsWith('\x1b')) {
-                let inp = Array.from(input).map(c=>c.codePointAt()).filter(c=>c > 31).map(c=>String.fromCharCode(c)).join('');
-                this.buff = this.buff.slice(0,i) + inp + this.buff.slice(i);
-                this.cx += inp.length;
-                fix();
-                this.m = true;
-            }
-            modules.updateBuffer(this);
         }
 
         let lines = this.buff.split('\n');
@@ -359,46 +452,56 @@ class BufferWindow extends Window {
                 w[li][ln.length] = s+'~\x1b[m';
             }
             let s = themes.style(['THEME.back']);
-            w[li][(l==undefined?1:l.length)+ln.length] = s+' ';
-            w[li][sout.columns.length-1] += '\x1b[m';
+            for (let j = (l==undefined?1:l.length)+ln.length; j < sout.columns; j++) {
+                w[li][j] = s+' \x1b[m';
+            }
         }
 
         w[sout.rows-1][0] = '\x1b[40m[';
         w[sout.rows-1][sout.columns-1] = ']\x1b[49m';
 
+        w[0][0] = '[';
+        w[0][sout.columns-1] = ']';
+        w[0][sout.columns-3] = '\x1b[33m'+(this.m?'M':' ')+'\x1b[39m';
+        {
+            let msg = '<new buffer>';
+            for (let i = 0; i < msg.length; i++)
+                w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
+        }
+        let [cx,cy] = this.getFixedCursor();
+        {
+            const msg = 'buffer';
+            for (let i = 0; i < msg.length; i++)
+                w[sout.rows-1][i+2] = msg[i];
+            w[sout.rows-1][1] += '\x1b[35m';
+            w[sout.rows-1][1+dlen(msg)] += '\x1b[39m';
+        }
+        {
+            const msg = (cy+1).toString().padStart(3,' ');
+            for (let i = 0; i < msg.length; i++)
+                w[sout.rows-1][sout.columns-9+i] = msg[i];
+        }
+        {
+            const msg = (cx+1).toString().padEnd(3,' ');
+            for (let i = 0; i < msg.length; i++)
+                w[sout.rows-1][sout.columns-5+i] = msg[i];
+        }
+        {
+            const msg = (this.mode||'<none>').padStart(sout.columns-19);
+            for (let i = 0; i < msg.length; i++) {
+                w[sout.rows-1][9+i] = msg[i];
+            }
+        }
+        w[sout.rows-1][sout.columns-6] = '\x1b[39m:\x1b[33m';
+        w[sout.rows-1][sout.columns-3] += '\x1b[39m';
+        w[sout.rows-1][sout.columns-10] += '\x1b[33m';
+
+        if (pr) pr(w);
+
         if (catches)
             return w;
         else {
-            w[0][0] = '[';
-            w[0][sout.columns-1] = ']';
-            w[0][sout.columns-3] = '\x1b[33m'+(this.m?'M':' ')+'\x1b[39m';
-            {
-                let msg = '<new buffer>';
-                for (let i = 0; i < msg.length; i++)
-                    w[0][Math.floor(sout.columns/2-msg.length/2)+i] = msg[i];
-            }
-            let [cx,cy] = this.getFixedCursor();
-            {
-                const msg = 'buffer';
-                for (let i = 0; i < msg.length; i++)
-                    w[sout.rows-1][i+2] = msg[i];
-                w[sout.rows-1][1] += '\x1b[35m';
-                w[sout.rows-1][1+dlen(msg)] += '\x1b[39m';
-            }
-            {
-                const msg = (cy+1).toString().padStart(3,' ');
-                for (let i = 0; i < msg.length; i++)
-                    w[sout.rows-1][sout.columns-9+i] = msg[i];
-            }
-            {
-                const msg = (cx+1).toString().padEnd(3,' ');
-                for (let i = 0; i < msg.length; i++)
-                    w[sout.rows-1][sout.columns-5+i] = msg[i];
-            }
-            w[sout.rows-1][sout.columns-6] = '\x1b[39m:\x1b[33m';
-            w[sout.rows-1][sout.columns-3] += '\x1b[39m';
-            w[sout.rows-1][sout.columns-10] += '\x1b[33m';
-            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows-1,cy-this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx-this.sx))+5}H`);
+            sout.write('\x1b[H\x1b[39m'+w.map(l=>l.join('')).join('\n')+`\x1b[${Math.max(1,Math.min(sout.rows-1,cy-this.sy+1))+1};${Math.max(0,Math.min(sout.columns-3,cx-this.sx))+5}H`+(ps?ps()||'':''));
         }
     }
 }
@@ -686,6 +789,7 @@ function update(inbuff,evt) {
     process.stdout.on('resize',()=>update('',UpdateEvent.Resize));
 
     const ui = setInterval(()=>update('',UpdateEvent.Update),100);
+    const ui2 = setInterval(()=>update('',UpdateEvent.Update2),1000);
 
     while (!quit) {
 
@@ -718,6 +822,7 @@ function update(inbuff,evt) {
     }
     
     clearInterval(ui);
+    clearInterval(ui2);
 
     for (let module of modules.modules) {
         module.mod.unref();
