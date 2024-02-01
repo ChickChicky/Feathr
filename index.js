@@ -355,11 +355,15 @@ class BufferWindow extends Window {
                 }
                 else if (input == '\r') {
                     let tokens = this.menustate.cmd.split(/ /g);
-                    if (tokens[0] == 'mode' && tokens[1]) {
+                    let cmd = tokens[0];
+                    if (cmd == 'mode' && tokens[1]) {
                         this.mode = tokens[1];
                     }
-                    if (tokens[0] == 'theme' && tokens[1]) {
+                    if (cmd == 'theme' && tokens[1]) {
                         themes.theme = tokens[1];
+                    }
+                    if (cmd == 'quit') {
+                        quit = true;
                     }
                     this.menu = null;
                 }
@@ -404,7 +408,8 @@ class BufferWindow extends Window {
                         if (t && Object.keys(modules.modes).includes(t)) {
                             s.push({s:'string',c0:tokens[0].length+1,c1:t.length+tokens[0].length});
                         }
-                    }
+                    },
+                    'quit': ()=>{},
                 }[tokens[0]]);
                 if (c) {
                     s.push({s:'keyword',c0:0,c1:tokens[0].length-1});
@@ -438,20 +443,23 @@ class BufferWindow extends Window {
                 w[li][ln.length-2] += '\x1b[27m';
             }
             let l = lines[ll];
+            let b = '';
+            if (ll == this.cy)
+                b += '-current';
             if (l != undefined) {
                 for (let j = 0; j < l.length && j < sout.columns-ln.length; j++) {
                     let ci = j+this.sx;
                     if (j == 0 && ci != 0)
                         w[li][j+ln.length] = '\x1b[90m…\x1b[39m';
                     else
-                        w[li][j+ln.length] = themes.style(['THEME.text','THEME.back'].concat(this.style.filter(s=>(s.l0>ll&&s.l1<ll)||(s.l0==ll&&ci>=s.c0&&(s.l0!=s.l1||ci<=s.c1))||(s.l1==ll&&ci<=s.c1&&(s.l0!=s.l1||ci>=s.c0))).map(s=>s.s)))+(l[ci]||' ')+'\x1b[m';
+                        w[li][j+ln.length] = themes.style(['THEME.text','THEME.back'+b].concat(this.style.filter(s=>(s.l0>ll&&s.l1<ll)||(s.l0==ll&&ci>=s.c0&&(s.l0!=s.l1||ci<=s.c1))||(s.l1==ll&&ci<=s.c1&&(s.l0!=s.l1||ci>=s.c0))).map(s=>s.s)))+(l[ci]||' ')+'\x1b[m';
                 }
             }
             else {
-                let s = themes.style(['THEME.back','THEME.emptyline']);
+                let s = themes.style(['THEME.back'+b,'THEME.emptyline']);
                 w[li][ln.length] = s+'~\x1b[m';
             }
-            let s = themes.style(['THEME.back']);
+            let s = themes.style(['THEME.back'+b]);
             for (let j = (l==undefined?1:l.length)+ln.length; j < sout.columns; j++) {
                 w[li][j] = s+' \x1b[m';
             }

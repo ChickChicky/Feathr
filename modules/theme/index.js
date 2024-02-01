@@ -40,7 +40,7 @@ parentPort.postMessage({type:'register-style',payload:{
             s: '\x1b[48;2;40;42;54m'
         },
         'back-current': {
-            s: '\x1b[48;2;68;71;90m'
+            s: '\x1b[48;2;50;52;74m'
         },
         'back-menu': {
             s: '\x1b[48;2;15;17;29m'
